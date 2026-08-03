@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 1,
+  "importedAt": "2026-08-03",
+  "components": [
+    {
+      "name": "libsigrok",
+      "directory": "src/libsigrok",
+      "repository": "https://github.com/sigrokproject/libsigrok.git",
+      "commit": "0bc2487778e660f4d3116729b6f4aee2b1996bb0",
+      "tree": "3439c6a4c49b9bd06ac7d23ccc419ad6c3e7c735",
+      "archiveSha256": "b9df96d416b55f0af99f96abc69b2f79e6dbc4e9efb225229d3dcc9430ce9440",
+      "licenseFiles": [
+        "src/libsigrok/COPYING"
+      ]
+    },
+    {
+      "name": "libsigrokdecode",
+      "directory": "src/libsigrokdecode",
+      "repository": "https://github.com/sigrokproject/libsigrokdecode.git",
+      "commit": "71f451443029322d57376214c330b518efd84f88",
+      "tree": "149b3ae849f0e226e4cc3c323e57eb559cc51515",
+      "archiveSha256": "dbc63685beabfbe8eeb24eec7ab161b9b6aba22d5a95b078e8c2d002a7784e8a",
+      "licenseFiles": [
+        "src/libsigrokdecode/COPYING"
+      ]
+    },
+    {
+      "name": "sigrok-cli",
+      "directory": "src/sigrok-cli",
+      "repository": "https://github.com/sigrokproject/sigrok-cli.git",
+      "commit": "f44dd91347e7ac797cefc23162b9fcf0b7329f1f",
+      "tree": "1876db23a5bd1ff3d74c8eb3b46c6dd4e10aaea1",
+      "archiveSha256": "524111f82d39dd4a04806cfd603a01b8d40d3b6e7a13f1955270a91e5e63d6cf",
+      "licenseFiles": [
+        "src/sigrok-cli/COPYING"
+      ]
+    }
+  ]
+}
