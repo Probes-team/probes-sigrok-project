@@ -22,6 +22,9 @@
 #include <stdio.h>
 #include <glib.h>
 #include <glib/gstdio.h>
+#ifdef G_OS_WIN32
+#include <windows.h>
+#endif
 #include <libsigrok/libsigrok.h>
 #include "libsigrok-internal.h"
 
@@ -34,6 +37,34 @@
  *
  * Access to resource files.
  */
+
+static char *package_resource_dir(const char *subdir)
+{
+#ifdef G_OS_WIN32
+	WCHAR executable_path[32768];
+	DWORD path_length;
+	char *utf8_path, *package_root, *resource_dir;
+
+	path_length = GetModuleFileNameW(NULL, executable_path,
+			G_N_ELEMENTS(executable_path));
+	if (!path_length || path_length == G_N_ELEMENTS(executable_path))
+		return NULL;
+
+	utf8_path = g_utf16_to_utf8((const gunichar2 *)executable_path,
+			path_length, NULL, NULL, NULL);
+	if (!utf8_path)
+		return NULL;
+	package_root = g_path_get_dirname(utf8_path);
+	resource_dir = g_build_filename(package_root, subdir, NULL);
+	g_free(package_root);
+	g_free(utf8_path);
+
+	return resource_dir;
+#else
+	(void)subdir;
+	return NULL;
+#endif
+}
 
 /**
  * Get a list of paths where we look for resource (e.g. firmware) files.
@@ -50,6 +81,7 @@ SR_API GSList *sr_resourcepaths_get(int res_type)
 	GSList *l = NULL;
 	const char *env;
 	const char *const *datadirs;
+	char *package_dir;
 
 	if (res_type == SR_RESOURCE_FIRMWARE) {
 		subdir = "sigrok-firmware";
@@ -83,6 +115,11 @@ SR_API GSList *sr_resourcepaths_get(int res_type)
 		l = g_slist_append(l, g_strdup(FIRMWARE_DIR));
 	}
 #endif
+
+	/* A portable Windows package keeps firmware next to its executable. */
+	package_dir = package_resource_dir("firmware");
+	if (package_dir)
+		l = g_slist_append(l, package_dir);
 
 	datadirs = g_get_system_data_dirs();
 	while (*datadirs)

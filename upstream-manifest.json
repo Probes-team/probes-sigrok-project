@@ -34,6 +34,17 @@
       "licenseFiles": [
         "src/sigrok-cli/COPYING"
       ]
+    },
+    {
+      "name": "sigrok-firmware",
+      "directory": "src/sigrok-firmware",
+      "repository": "https://github.com/sigrokproject/sigrok-firmware.git",
+      "commit": "11eed913a9c535b87b5d5b5b92d2622cf34cee8b",
+      "tree": "3ecd3802c319b54bff0fabfd82c8c1aac9107b2c",
+      "archiveSha256": "9d0fa8e342205ee25d86e2283afe2e917b7346ef433e3d01410556999b903531",
+      "licenseFiles": [
+        "src/sigrok-firmware/COPYING"
+      ]
     }
   ]
 }

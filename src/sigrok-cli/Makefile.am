@@ -26,6 +26,7 @@ bin_PROGRAMS = sigrok-cli
 
 sigrok_cli_SOURCES = \
 	main.c \
+	runtime_paths.c \
 	show.c \
 	device.c \
 	session.c \
@@ -33,6 +34,7 @@ sigrok_cli_SOURCES = \
 	output.c \
 	decode.c \
 	sigrok-cli.h \
+	runtime_paths.h \
 	parsers.c \
 	anykey.c \
 	options.c

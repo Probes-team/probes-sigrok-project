@@ -22,6 +22,9 @@
 #include "libsigrokdecode-internal.h" /* First, so we avoid a _POSIX_C_SOURCE warning. */
 #include "libsigrokdecode.h"
 #include <glib.h>
+#ifdef G_OS_WIN32
+#include <windows.h>
+#endif
 
 /** @cond PRIVATE */
 
@@ -110,6 +113,40 @@ static int searchpath_add_xdg_dir(const char *datadir)
 	g_free(decdir);
 
 	return ret;
+}
+
+static int searchpath_add_package_dir(void)
+{
+#ifdef G_OS_WIN32
+	WCHAR executable_path[32768];
+	DWORD path_length;
+	char *utf8_path, *package_root, *decoder_dir;
+	int ret;
+
+	path_length = GetModuleFileNameW(NULL, executable_path,
+			G_N_ELEMENTS(executable_path));
+	if (!path_length || path_length == G_N_ELEMENTS(executable_path))
+		return SRD_OK;
+
+	utf8_path = g_utf16_to_utf8((const gunichar2 *)executable_path,
+			path_length, NULL, NULL, NULL);
+	if (!utf8_path)
+		return SRD_ERR_MALLOC;
+	package_root = g_path_get_dirname(utf8_path);
+	decoder_dir = g_build_filename(package_root, "decoders", NULL);
+	g_free(package_root);
+	g_free(utf8_path);
+
+	if (g_file_test(decoder_dir, G_FILE_TEST_IS_DIR))
+		ret = srd_decoder_searchpath_add(decoder_dir);
+	else
+		ret = SRD_OK;
+	g_free(decoder_dir);
+
+	return ret;
+#else
+	return SRD_OK;
+#endif
 }
 
 static void print_versions(void)
@@ -254,6 +291,11 @@ SRD_API int srd_init(const char *path)
 		return ret;
 	}
 #endif
+	/* A portable Windows package keeps decoders next to its executable. */
+	if ((ret = searchpath_add_package_dir()) != SRD_OK) {
+		Py_Finalize();
+		return ret;
+	}
 	/* Location relative to the XDG user data directory. */
 	ret = searchpath_add_xdg_dir(g_get_user_data_dir());
 	if (ret != SRD_OK) {

@@ -21,6 +21,7 @@
 #include <stdlib.h>
 #include <glib.h>
 #include "sigrok-cli.h"
+#include "runtime_paths.h"
 
 struct sr_context *sr_ctx = NULL;
 #ifdef HAVE_SRD
@@ -244,6 +245,9 @@ int main(int argc, char **argv)
 		goto done;
 
 #ifdef HAVE_SRD
+	if (runtime_paths_init() != 0)
+		goto done;
+
 	if (opt_pd_binary && !opt_pds) {
 		g_critical("Option -B will not take effect in the absence of -P.");
 		goto done;
