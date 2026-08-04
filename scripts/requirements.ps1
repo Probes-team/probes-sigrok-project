@@ -20,7 +20,8 @@ $requiredPackages = @(
     'mingw-w64-x86_64-libserialport',
     'mingw-w64-x86_64-libftdi',
     'mingw-w64-x86_64-hidapi',
-    'mingw-w64-x86_64-nettle'
+    'mingw-w64-x86_64-nettle',
+    'mingw-w64-x86_64-check'
 )
 
 $checks = @(
@@ -31,7 +32,7 @@ $checks = @(
     'command -v make',
     'command -v pkg-config',
     'command -v python3.14',
-    'pkg-config --exists glib-2.0 gio-2.0 zlib libzip libusb-1.0 libserialport libftdi1 hidapi python-3.14-embed',
+    "pkg-config --exists 'check >= 0.9.4' glib-2.0 gio-2.0 zlib libzip libusb-1.0 libserialport libftdi1 hidapi python-3.14-embed",
     'test "$(pkg-config --modversion python-3.14-embed)" = "3.14"'
 )
 

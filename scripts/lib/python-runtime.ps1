@@ -17,8 +17,16 @@ function Copy-EmbeddedPythonRuntime {
     Get-ChildItem -LiteralPath $stdlib -Force | ForEach-Object {
         Copy-Item -LiteralPath $_.FullName -Destination $pythonDestination -Recurse -Force
     }
-    $pythonObject = Join-Path $pythonDestination 'config-3.14/python.o'
-    if (Test-Path -LiteralPath $pythonObject) {
-        Remove-Item -LiteralPath $pythonObject -Force
+    foreach ($path in @(
+        (Join-Path $pythonDestination 'config-3.14/python.o'),
+        (Join-Path $pythonDestination 'test'),
+        (Join-Path $pythonDestination 'idlelib'),
+        (Join-Path $pythonDestination 'tkinter')
+    )) {
+        if (Test-Path -LiteralPath $path) {
+            Remove-Item -LiteralPath $path -Recurse -Force
+        }
     }
+    Get-ChildItem -LiteralPath $pythonDestination -Recurse -File -Filter '*.pyc' |
+        Remove-Item -Force
 }

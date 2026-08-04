@@ -33,6 +33,21 @@ build_component() {
     mkdir -p "$component_build"
     (cd "$component_build" && "$component_source/configure" "${common_configure[@]}" "$@")
     (cd "$component_build" && make -j"$jobs")
+    case "$component" in
+        libsigrok|libsigrokdecode)
+            check_log="$component_build/check.log"
+            if ! (cd "$component_build" && make check >"$check_log" 2>&1); then
+                cat "$check_log"
+                exit 1
+            fi
+            cat "$check_log"
+            check_total=$(sed -n 's/^# TOTAL: *//p' "$check_log" | tail -1)
+            if [ -z "$check_total" ] || [ "$check_total" -eq 0 ]; then
+                echo "No effective tests were registered for $component." >&2
+                exit 1
+            fi
+            ;;
+    esac
     (cd "$component_build" && make DESTDIR="$stage_root" install)
 }
 
@@ -44,13 +59,13 @@ build_component sigrok-cli
 runtime_supported="$work_root/runtime-supported.txt"
 (PATH="$stage_root$prefix/bin:/mingw64/bin:/usr/bin" "$stage_root$prefix/bin/sigrok-cli.exe" --list-supported || true) >"$runtime_supported" 2>&1
 
-python3.14 - "$work_root/build-manifest.json" "$project_commit" "$target" "$configuration" "$stage_root" "$source_root/libsigrok/configure.ac" "$build_root/libsigrok/config.log" "$runtime_supported" <<'PY'
+python3.14 - "$work_root/build-manifest.json" "$project_commit" "$target" "$configuration" "$stage_root" "$source_root/libsigrok/configure.ac" "$build_root/libsigrok/config.log" "$runtime_supported" "$source_root/sigrok-firmware" "$build_root/libsigrok/check.log" "$build_root/libsigrokdecode/check.log" <<'PY'
 import json
 import pathlib
 import re
 import sys
 
-output, project_commit, target, configuration, stage, configure_ac, config_log, runtime_supported = sys.argv[1:]
+output, project_commit, target, configuration, stage, configure_ac, config_log, runtime_supported, firmware_root, libsigrok_check, libsigrokdecode_check = sys.argv[1:]
 stage_root = pathlib.Path(stage)
 drivers = []
 configure_text = pathlib.Path(configure_ac).read_text(encoding='utf-8')
@@ -74,6 +89,22 @@ for line in (stage_root / 'probes-sigrok' / 'lib' / 'pkgconfig' / 'libsigrok.pc'
 else:
     libsigrok_version = 'unknown'
 decoders = sorted(p.name for p in (stage_root / 'probes-sigrok' / 'share' / 'libsigrokdecode' / 'decoders').iterdir() if p.is_dir())
+firmware_root = pathlib.Path(firmware_root)
+firmware = sorted(str(p.relative_to(firmware_root)).replace('\\', '/') for p in firmware_root.rglob('*') if p.is_file())
+
+def check_summary(component, path):
+    text = pathlib.Path(path).read_text(encoding='utf-8', errors='replace')
+    values = {}
+    for name in ('TOTAL', 'PASS', 'SKIP', 'XFAIL', 'FAIL', 'XPASS', 'ERROR'):
+        match = re.search(r'^# ' + name + r':\s*(\d+)\s*$', text, re.MULTILINE)
+        if not match:
+            raise RuntimeError(f'missing {name} summary for {component}')
+        values[name.lower()] = int(match.group(1))
+    if not values['total'] or values['fail'] or values['error']:
+        raise RuntimeError(f'unsuccessful test summary for {component}: {values}')
+    values['component'] = component
+    return values
+
 runtime_drivers = []
 in_driver_section = False
 for line in pathlib.Path(runtime_supported).read_text(encoding='utf-8', errors='replace').splitlines():
@@ -95,6 +126,11 @@ payload = {
     'drivers': drivers,
     'runtimeDrivers': sorted(set(runtime_drivers)),
     'decoders': decoders,
+    'firmware': firmware,
+    'testSuites': [
+        check_summary('libsigrok', libsigrok_check),
+        check_summary('libsigrokdecode', libsigrokdecode_check),
+    ],
     'stagePrefix': '/probes-sigrok',
 }
 pathlib.Path(output).write_text(json.dumps(payload, indent=2) + '\n')

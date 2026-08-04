@@ -39,6 +39,8 @@ int runtime_paths_init(void)
 
 	if (g_file_test(python_home, G_FILE_TEST_IS_DIR))
 		g_setenv("PYTHONHOME", python_home, TRUE);
+	/* A portable package must remain immutable while loading decoders. */
+	g_setenv("PYTHONDONTWRITEBYTECODE", "1", TRUE);
 	g_free(python_home);
 #endif
 

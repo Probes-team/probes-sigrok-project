@@ -10,6 +10,7 @@ $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'lib/dll-closure.ps1')
 . (Join-Path $PSScriptRoot 'lib/python-runtime.ps1')
 . (Join-Path $PSScriptRoot 'lib/source-disclosure.ps1')
+. (Join-Path $PSScriptRoot 'lib/package-licenses.ps1')
 
 $projectRoot = Get-ProjectRoot -ScriptRoot $PSScriptRoot
 $toolchain = Get-ToolchainConfig -ProjectRoot $projectRoot
@@ -48,11 +49,7 @@ $objdump = Join-Path $mingwBin 'objdump.exe'
 $dllClosure = Resolve-DllClosure -PackageRoot $packageRoot -StageBin $stageBin -MsysBin $mingwBin -ObjdumpPath $objdump
 
 New-SourceDisclosure -ProjectRoot $projectRoot -PackageRoot $packageRoot
-New-Item -ItemType Directory -Force -Path (Join-Path $packageRoot 'LICENSES') | Out-Null
-Get-ChildItem -LiteralPath (Join-Path $projectRoot 'src') -Recurse -File -Filter COPYING | ForEach-Object {
-    $component = Split-Path $_.DirectoryName -Leaf
-    Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $packageRoot "LICENSES/$component-COPYING")
-}
+Copy-PackageLicenses -ProjectRoot $projectRoot -PackageRoot $packageRoot -Toolchain $toolchain
 Copy-Item -LiteralPath (Join-Path $projectRoot 'licenses/THIRD_PARTY_NOTICES.md') -Destination $packageRoot
 
 $projectCommit = (git -C $projectRoot rev-parse HEAD).Trim()
@@ -77,6 +74,7 @@ $manifest = [ordered]@{
     projectCommit = $projectCommit
     build = (Get-Content -LiteralPath $buildManifestPath -Raw | ConvertFrom-Json)
     dllClosure = @($dllClosure)
+    peDependencies = @(Get-PeDependencyManifest -PackageRoot $packageRoot -ObjdumpPath $objdump)
     files = @($files | Sort-Object path)
 }
 $manifest | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath (Join-Path $packageRoot 'package-manifest.json') -Encoding utf8

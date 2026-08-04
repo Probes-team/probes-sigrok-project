@@ -69,3 +69,19 @@ function Resolve-DllClosure {
 
     return $copied | Sort-Object -Unique
 }
+
+function Get-PeDependencyManifest {
+    param(
+        [Parameter(Mandatory)][string]$PackageRoot,
+        [Parameter(Mandatory)][string]$ObjdumpPath
+    )
+
+    return @(Get-ChildItem -LiteralPath $PackageRoot -Recurse -File |
+        Where-Object { $_.Extension -in @('.exe', '.dll', '.pyd') } |
+        ForEach-Object {
+            [ordered]@{
+                path = $_.FullName.Substring($PackageRoot.Length + 1).Replace('\', '/')
+                imports = @(Get-PeImports -FilePath $_.FullName -ObjdumpPath $ObjdumpPath)
+            }
+        } | Sort-Object path)
+}

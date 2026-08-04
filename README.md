@@ -266,3 +266,15 @@ source-disclosure/
 - 不试图支持全部上游 driver 或 decoder。
 - 正常项目构建不修改 `../sigrok/`。
 
+## 11. 定制开发起始规则
+
+每次新增或修改自定义 driver/decoder，先在 `src/` 完成代码，再更新
+`config/custom-components.json` 和 `tests/fixtures/`。driver 条目必须提供
+一个无破坏性的 CLI 命令及稳定输出断言；decoder 条目必须提供可再现的采样
+fixture、CLI 参数和稳定输出断言。`verify-package.ps1` 会在打包运行时执行
+所有登记的 fixture。
+
+`build.ps1` 会在 `libsigrok` 和 `libsigrokdecode` 中执行有效的 `make check`。
+若测试摘要显示 `TOTAL: 0`，构建将失败。发布前在构建机运行完整依赖扫描，
+在没有 MSYS2 的干净机器上运行同一 `verify-package.ps1`，后者使用包内封存的
+PE 依赖清单，不要求目标机安装构建工具链。
