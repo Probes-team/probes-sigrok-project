@@ -31,6 +31,9 @@
 #define CONN_USB_VIDPID  "^([0-9a-fA-F]{4})\\.([0-9a-fA-F]{4})$"
 #define CONN_USB_BUSADDR "^(\\d+)\\.(\\d+)$"
 
+/* A libusb backend without pollfds still needs periodic event handling. */
+#define USB_FALLBACK_POLL_TIMEOUT_MS 10
+
 #define LOG_PREFIX "usb"
 
 #if !HAVE_LIBUSB_OS_HANDLE
@@ -50,6 +53,7 @@ struct usb_source {
 
 	struct libusb_context *usb_ctx;
 	GPtrArray *pollfds;
+	gboolean use_pollfds;
 };
 
 /** USB event source prepare() method.
@@ -160,7 +164,8 @@ static void usb_source_finalize(GSource *source)
 
 	sr_spew("%s", __func__);
 
-	libusb_set_pollfd_notifiers(usource->usb_ctx, NULL, NULL, NULL);
+	if (usource->use_pollfds)
+		libusb_set_pollfd_notifiers(usource->usb_ctx, NULL, NULL, NULL);
 
 	g_ptr_array_unref(usource->pollfds);
 	usource->pollfds = NULL;
@@ -260,17 +265,23 @@ static GSource *usb_source_new(struct sr_session *session,
 	GSource *source;
 	struct usb_source *usource;
 	const struct libusb_pollfd **upollfds, **upfd;
+	gboolean have_pollfds;
 
 	upollfds = libusb_get_pollfds(usb_ctx);
-	if (!upollfds) {
-		sr_err("Failed to get libusb file descriptors.");
-		return NULL;
-	}
+	have_pollfds = upollfds && upollfds[0];
 	source = g_source_new(&usb_source_funcs, sizeof(struct usb_source));
 	usource = (struct usb_source *)source;
 
-	g_source_set_name(source, "usb");
+	g_source_set_name(source, have_pollfds ? "usb" : "usb-timeout");
 
+	/*
+	 * libusb's Windows backends do not expose pollable file descriptors.
+	 * The driver callback remains responsible for calling
+	 * libusb_handle_events_timeout(); use its requested timeout to schedule
+	 * that callback in the same way as a pollfd-source timeout would.
+	 */
+	if (!have_pollfds && timeout_ms < 0)
+		timeout_ms = USB_FALLBACK_POLL_TIMEOUT_MS;
 	if (timeout_ms >= 0) {
 		usource->timeout_us = 1000 * (int64_t)timeout_ms;
 		usource->due_us = 0;
@@ -281,17 +292,26 @@ static GSource *usb_source_new(struct sr_session *session,
 	usource->session = session;
 	usource->usb_ctx = usb_ctx;
 	usource->pollfds = g_ptr_array_new_full(8, &usb_source_free_pollfd);
+	usource->use_pollfds = have_pollfds;
 
-	for (upfd = upollfds; *upfd != NULL; upfd++)
-		usb_pollfd_added((*upfd)->fd, (*upfd)->events, usource);
+	if (have_pollfds) {
+		for (upfd = upollfds; *upfd != NULL; upfd++)
+			usb_pollfd_added((*upfd)->fd, (*upfd)->events, usource);
+	}
 
+	if (upollfds) {
 #if (LIBUSB_API_VERSION >= 0x01000104)
-	libusb_free_pollfds(upollfds);
+		libusb_free_pollfds(upollfds);
 #else
-	free(upollfds);
+		free(upollfds);
 #endif
-	libusb_set_pollfd_notifiers(usb_ctx,
-		&usb_pollfd_added, &usb_pollfd_removed, usource);
+	}
+	if (have_pollfds) {
+		libusb_set_pollfd_notifiers(usb_ctx,
+			&usb_pollfd_added, &usb_pollfd_removed, usource);
+	} else {
+		sr_info("libusb did not expose pollfds; using timeout-driven USB event source.");
+	}
 
 	return source;
 }

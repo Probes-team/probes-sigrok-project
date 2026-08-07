@@ -1,0 +1,4 @@
+Synthetic DSLogic cross layout, 3 physical channels.
+It contains one complete 24-byte atomic block followed by the six-byte tail "tail!\\n".
+For sample indices 0 through 63, each physical channel's expected bit is bit (s mod 64) of its first 64-bit word; the retained tail has no valid sample index.
+The complete block represents 64 samples; finalization must reject the retained incomplete tail.

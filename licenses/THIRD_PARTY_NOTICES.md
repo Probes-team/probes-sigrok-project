@@ -10,3 +10,12 @@ provided in `source-disclosure/`, and the package manifest records every file
 hash.
 
 Do not remove copyright notices or license files from imported source trees.
+
+DreamSourceLab DSLogic FPGA bitstreams and FX2 firmware images are sourced
+from DreamSourceLab/DSView under the MIT license at
+`src/sigrok-firmware/dreamsourcelab-dslogic/licenses/license.txt`. The FPGA
+bitstreams plus `DSLogic.fw` and `DSLogicPro.fw` come from v1.3.2
+(`03131dd261f08f84262c0172fd051b16cc3bb586`); `DSLogicBasic.fw` and
+`DSLogicPlus.fw` come from the earlier public revision
+`f17c612cb1d600a50ca4cdf804967770364b4f08`. Their file-level provenance and
+checksums are recorded in `config/dreamsourcelab-dslogic-firmware.json`.

@@ -25,6 +25,23 @@ dist_pkgdata_DATA = \
 	asix-sigma/asix-sigma-200.fw \
 	asix-sigma/asix-sigma-50.fw \
 	asix-sigma/asix-sigma-50sync.fw \
+	dreamsourcelab-dslogic/DSLogic.fw \
+	dreamsourcelab-dslogic/DSLogicBasic.fw \
+	dreamsourcelab-dslogic/DSLogicPlus.fw \
+	dreamsourcelab-dslogic/DSLogicPro.fw \
+	dreamsourcelab-dslogic/DSLogic33.bin \
+	dreamsourcelab-dslogic/DSLogic50.bin \
+	dreamsourcelab-dslogic/DSLogicBasic.bin \
+	dreamsourcelab-dslogic/DSLogicPlus-pgl12-2.bin \
+	dreamsourcelab-dslogic/DSLogicPlus-pgl12.bin \
+	dreamsourcelab-dslogic/DSLogicPlus.bin \
+	dreamsourcelab-dslogic/DSLogicPro.bin \
+	dreamsourcelab-dslogic/DSLogicU2Basic-pgl12-2.bin \
+	dreamsourcelab-dslogic/DSLogicU2Basic-pgl12.bin \
+	dreamsourcelab-dslogic/DSLogicU2Basic.bin \
+	dreamsourcelab-dslogic/DSLogicU2Pro16.bin \
+	dreamsourcelab-dslogic/DSLogicU3Pro16.bin \
+	dreamsourcelab-dslogic/DSLogicU3Pro32.bin \
 	sysclk-lwla/sysclk-lwla1034-extneg.rbf \
 	sysclk-lwla/sysclk-lwla1034-extpos.rbf \
 	sysclk-lwla/sysclk-lwla1034-int.rbf \
@@ -32,6 +49,7 @@ dist_pkgdata_DATA = \
 
 dist_noinst_DATA = \
 	asix-sigma/LICENSE.Sigma \
+	dreamsourcelab-dslogic/licenses/license.txt \
 	sysclk-lwla/LICENSE.LWLA
 
 MAINTAINERCLEANFILES = ChangeLog
@@ -41,4 +59,3 @@ ChangeLog:
 	git --git-dir '$(top_srcdir)/.git' log >$@ || touch $@
 
 dist-hook: ChangeLog
-

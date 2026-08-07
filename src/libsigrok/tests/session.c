@@ -21,7 +21,19 @@
 #include <stdlib.h>
 #include <check.h>
 #include <libsigrok/libsigrok.h>
+#include "libsigrok-internal.h"
 #include "lib.h"
+
+static int usb_source_test_callback(int fd, int revents, void *cb_data)
+{
+	unsigned int *callback_count = cb_data;
+
+	(void)fd;
+	(void)revents;
+	(*callback_count)++;
+
+	return TRUE;
+}
 
 /*
  * Check whether sr_session_new() works.
@@ -185,6 +197,45 @@ START_TEST(test_session_trigger_get_null)
 }
 END_TEST
 
+/*
+ * Windows libusb backends commonly expose no pollfds. usb_source_add() must
+ * still provide a timeout-driven source so asynchronous USB drivers can pump
+ * libusb events from their receive callback.
+ */
+START_TEST(test_usb_source_add_without_pollfds)
+{
+	struct sr_session *session;
+	unsigned int callback_count = 0;
+	int ret;
+	unsigned int attempt;
+
+	ret = sr_session_new(srtest_ctx, &session);
+	ck_assert_int_eq(ret, SR_OK);
+	/* Test the source in isolation without a real device acquisition. */
+	session->main_context = g_main_context_new();
+
+	ret = usb_source_add(session, srtest_ctx, 1,
+		usb_source_test_callback, &callback_count);
+	ck_assert_int_eq(ret, SR_OK);
+	for (attempt = 0; attempt < 100 && callback_count == 0; attempt++) {
+		g_usleep(1000);
+		g_main_context_iteration(session->main_context, FALSE);
+	}
+	ck_assert_msg(callback_count > 0,
+		"usb source callback was not dispatched from its timeout.");
+
+	/* Avoid scheduling a session-stop idle source in this isolated test. */
+	session->running = FALSE;
+	ret = usb_source_remove(session, srtest_ctx);
+	ck_assert_int_eq(ret, SR_OK);
+	while (g_main_context_pending(session->main_context))
+		g_main_context_iteration(session->main_context, FALSE);
+	g_main_context_unref(session->main_context);
+	session->main_context = NULL;
+	sr_session_destroy(session);
+}
+END_TEST
+
 Suite *suite_session(void)
 {
 	Suite *s;
@@ -207,6 +258,11 @@ Suite *suite_session(void)
 	tcase_add_test(tc, test_session_trigger_set_get_null);
 	tcase_add_test(tc, test_session_trigger_set_null);
 	tcase_add_test(tc, test_session_trigger_get_null);
+	suite_add_tcase(s, tc);
+
+	tc = tcase_create("usb_source");
+	tcase_add_checked_fixture(tc, srtest_setup, srtest_teardown);
+	tcase_add_test(tc, test_usb_source_add_without_pollfds);
 	suite_add_tcase(s, tc);
 
 	return s;

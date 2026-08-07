@@ -22,31 +22,6 @@
 #include <math.h>
 #include "protocol.h"
 
-static const struct dslogic_profile supported_device[] = {
-	/* DreamSourceLab DSLogic */
-	{ 0x2a0e, 0x0001, "DreamSourceLab", "DSLogic", NULL,
-		"dreamsourcelab-dslogic-fx2.fw",
-		0, "DreamSourceLab", "DSLogic", 256 * 1024 * 1024},
-	/* DreamSourceLab DSCope */
-	{ 0x2a0e, 0x0002, "DreamSourceLab", "DSCope", NULL,
-		"dreamsourcelab-dscope-fx2.fw",
-		0, "DreamSourceLab", "DSCope", 256 * 1024 * 1024},
-	/* DreamSourceLab DSLogic Pro */
-	{ 0x2a0e, 0x0003, "DreamSourceLab", "DSLogic Pro", NULL,
-		"dreamsourcelab-dslogic-pro-fx2.fw",
-		0, "DreamSourceLab", "DSLogic", 256 * 1024 * 1024},
-	/* DreamSourceLab DSLogic Plus */
-	{ 0x2a0e, 0x0020, "DreamSourceLab", "DSLogic Plus", NULL,
-		"dreamsourcelab-dslogic-plus-fx2.fw",
-		0, "DreamSourceLab", "DSLogic", 256 * 1024 * 1024},
-	/* DreamSourceLab DSLogic Basic */
-	{ 0x2a0e, 0x0021, "DreamSourceLab", "DSLogic Basic", NULL,
-		"dreamsourcelab-dslogic-basic-fx2.fw",
-		0, "DreamSourceLab", "DSLogic", 256 * 1024},
-
-	ALL_ZERO
-};
-
 static const uint32_t scanopts[] = {
 	SR_CONF_CONN,
 };
@@ -56,7 +31,9 @@ static const uint32_t drvopts[] = {
 };
 
 static const uint32_t devopts[] = {
-	SR_CONF_CONTINUOUS | SR_CONF_SET | SR_CONF_GET,
+	SR_CONF_DEVICE_MODE | SR_CONF_GET | SR_CONF_SET | SR_CONF_LIST,
+	SR_CONF_RLE | SR_CONF_GET | SR_CONF_SET,
+	SR_CONF_FILTER | SR_CONF_GET | SR_CONF_SET,
 	SR_CONF_LIMIT_SAMPLES | SR_CONF_GET | SR_CONF_SET,
 	SR_CONF_VOLTAGE_THRESHOLD | SR_CONF_GET | SR_CONF_SET | SR_CONF_LIST,
 	SR_CONF_CONN | SR_CONF_GET,
@@ -80,42 +57,119 @@ static const char *signal_edges[] = {
 	[DS_EDGE_FALLING] = "falling",
 };
 
+static const char *operation_mode_names[] = {
+	[DSLOGIC_OPERATION_BUFFER] = "buffer",
+	[DSLOGIC_OPERATION_STREAM] = "stream",
+	[DSLOGIC_OPERATION_INTERNAL_TEST] = "internal-test",
+};
+
 static const double thresholds[][2] = {
 	{ 0.7, 1.4 },
 	{ 1.4, 3.6 },
 };
 
-static const uint64_t samplerates[] = {
-	SR_KHZ(10),
-	SR_KHZ(20),
-	SR_KHZ(50),
-	SR_KHZ(100),
-	SR_KHZ(200),
-	SR_KHZ(500),
-	SR_MHZ(1),
-	SR_MHZ(2),
-	SR_MHZ(5),
-	SR_MHZ(10),
-	SR_MHZ(20),
-	SR_MHZ(25),
-	SR_MHZ(50),
-	SR_MHZ(100),
-	SR_MHZ(200),
-	SR_MHZ(400),
-};
-
-static gboolean is_plausible(const struct libusb_device_descriptor *des)
+static unsigned int enabled_channel_count(const struct sr_dev_inst *sdi)
 {
-	int i;
+	const GSList *channels;
+	unsigned int count = 0;
 
-	for (i = 0; supported_device[i].vid; i++) {
-		if (des->idVendor != supported_device[i].vid)
-			continue;
-		if (des->idProduct == supported_device[i].pid)
-			return TRUE;
+	for (channels = sdi->channels; channels; channels = channels->next) {
+		const struct sr_channel *channel = channels->data;
+		if (channel->enabled)
+			count++;
 	}
 
-	return FALSE;
+	return count;
+}
+
+static gboolean samplerate_is_available(const struct sr_dev_inst *sdi,
+		uint64_t samplerate, gboolean stream)
+{
+	const struct dev_context *devc = sdi->priv;
+
+	return devc && dslogic_profile_samplerate_is_available(devc->profile,
+		enabled_channel_count(sdi), samplerate, stream);
+}
+
+static int operation_mode_from_string(const char *name,
+		enum dslogic_operation_mode *operation_mode)
+{
+	enum dslogic_operation_mode candidate;
+
+	if (!name || !operation_mode)
+		return SR_ERR_ARG;
+	for (candidate = DSLOGIC_OPERATION_BUFFER;
+			candidate <= DSLOGIC_OPERATION_INTERNAL_TEST; candidate++) {
+		if (!strcmp(name, operation_mode_names[candidate])) {
+			*operation_mode = candidate;
+			return SR_OK;
+		}
+	}
+
+	return SR_ERR_ARG;
+}
+
+static int dslogic_apply_operation_mode(struct sr_dev_inst *sdi,
+		enum dslogic_operation_mode operation_mode)
+{
+	struct dev_context *devc;
+	const struct dslogic_channel_mode *mode;
+	const GSList *channels;
+	gboolean stream;
+	GArray *samplerates;
+	int ret;
+
+	if (!sdi || !(devc = sdi->priv) || !devc->profile ||
+			!dslogic_profile_operation_supported(devc->profile, operation_mode))
+		return SR_ERR_NA;
+
+	mode = dslogic_profile_mode_for_operation(devc->profile, operation_mode);
+	if (!mode || mode->channel_count == 0 ||
+			mode->channel_count > devc->profile->logic_channel_count)
+		return SR_ERR_ARG;
+	if (g_slist_length(sdi->channels) < mode->channel_count)
+		return SR_ERR_ARG;
+
+	/* DSView's mode transition owns the active probe count. */
+	for (channels = sdi->channels; channels; channels = channels->next) {
+		struct sr_channel *channel = channels->data;
+
+		if ((ret = sr_dev_channel_enable(channel,
+				channel->index < (int)mode->channel_count)) != SR_OK)
+			return ret;
+	}
+
+	stream = dslogic_profile_operation_is_stream(devc->profile,
+		operation_mode);
+	if (operation_mode == DSLOGIC_OPERATION_INTERNAL_TEST) {
+		/* Exact DSView derivation: buffered tests run at 100 MHz. */
+		devc->cur_samplerate = stream ? mode->max_samplerate / 10 : SR_MHZ(100);
+		devc->limit_samples = stream ? devc->cur_samplerate * 3 :
+			devc->profile->mem_depth / enabled_channel_count(sdi);
+	} else if (!devc->cur_samplerate || !samplerate_is_available(sdi,
+			devc->cur_samplerate, stream)) {
+		samplerates = dslogic_profile_samplerates_for_operation(devc->profile,
+			enabled_channel_count(sdi), stream);
+		if (!samplerates)
+			return SR_ERR_MALLOC;
+		if (samplerates->len == 0) {
+			g_array_unref(samplerates);
+			return SR_ERR_ARG;
+		}
+		devc->cur_samplerate = g_array_index(samplerates, uint64_t, 0);
+		g_array_unref(samplerates);
+	}
+
+	devc->operation_mode = operation_mode;
+	devc->selected_mode = mode;
+
+	return SR_OK;
+}
+
+static const struct dslogic_profile *profile_for_device(
+		const struct libusb_device_descriptor *des, enum libusb_speed usb_speed)
+{
+	return dslogic_profile_find(des->idVendor, des->idProduct, usb_speed);
 }
 
 static GSList *scan(struct sr_dev_driver *di, GSList *options)
@@ -134,6 +188,7 @@ static GSList *scan(struct sr_dev_driver *di, GSList *options)
 	libusb_device **devlist;
 	struct libusb_device_handle *hdl;
 	int ret, i, j;
+	int64_t firmware_updated;
 	const char *conn;
 	char manufacturer[64], product[64], serial_num[64], connection_id[64];
 	char channel_name[16];
@@ -158,6 +213,7 @@ static GSList *scan(struct sr_dev_driver *di, GSList *options)
 	devices = NULL;
 	libusb_get_device_list(drvc->sr_ctx->libusb_ctx, &devlist);
 	for (i = 0; devlist[i]; i++) {
+		firmware_updated = 0;
 		if (conn) {
 			usb = NULL;
 			for (l = conn_devices; l; l = l->next) {
@@ -174,7 +230,8 @@ static GSList *scan(struct sr_dev_driver *di, GSList *options)
 
 		libusb_get_device_descriptor(devlist[i], &des);
 
-		if (!is_plausible(&des))
+		prof = profile_for_device(&des, libusb_get_device_speed(devlist[i]));
+		if (!prof)
 			continue;
 
 		if ((ret = libusb_open(devlist[i], &hdl)) < 0) {
@@ -191,6 +248,7 @@ static GSList *scan(struct sr_dev_driver *di, GSList *options)
 				sizeof(manufacturer))) < 0) {
 			sr_warn("Failed to get manufacturer string descriptor: %s.",
 				libusb_error_name(ret));
+			libusb_close(hdl);
 			continue;
 		}
 
@@ -201,6 +259,7 @@ static GSList *scan(struct sr_dev_driver *di, GSList *options)
 				sizeof(product))) < 0) {
 			sr_warn("Failed to get product string descriptor: %s.",
 				libusb_error_name(ret));
+			libusb_close(hdl);
 			continue;
 		}
 
@@ -211,6 +270,7 @@ static GSList *scan(struct sr_dev_driver *di, GSList *options)
 				sizeof(serial_num))) < 0) {
 			sr_warn("Failed to get serial number string descriptor: %s.",
 				libusb_error_name(ret));
+			libusb_close(hdl);
 			continue;
 		}
 
@@ -219,17 +279,21 @@ static GSList *scan(struct sr_dev_driver *di, GSList *options)
 		if (usb_get_port_path(devlist[i], connection_id, sizeof(connection_id)) < 0)
 			continue;
 
-		prof = NULL;
-		for (j = 0; supported_device[j].vid; j++) {
-			if (des.idVendor == supported_device[j].vid &&
-					des.idProduct == supported_device[j].pid) {
-				prof = &supported_device[j];
-				break;
+		/* DSView v1.3.2's DSL/dslogic.c identifies this exact descriptor
+		 * pair as an already-loaded FX2 device. */
+		has_firmware = usb_match_manuf_prod(devlist[i], "DreamSourceLab",
+			"USB-based DSL Instrument v2");
+		if (!has_firmware) {
+			ret = dslogic_upload_fx2_if_needed(drvc->sr_ctx, devlist[i], prof,
+				FALSE, &firmware_updated);
+			if (ret != SR_OK) {
+				sr_warn("Skipping DSLogic device %d.%d (%s): cold boot is unavailable (%s).",
+					libusb_get_bus_number(devlist[i]),
+					libusb_get_device_address(devlist[i]), prof->model,
+					ret == SR_ERR_NA ? "no verified FX2 firmware" : "upload failed");
+				continue;
 			}
 		}
-
-		if (!prof)
-			continue;
 
 		sdi = g_malloc0(sizeof(struct sr_dev_inst));
 		sdi->status = SR_ST_INITIALIZING;
@@ -241,7 +305,7 @@ static GSList *scan(struct sr_dev_driver *di, GSList *options)
 
 		/* Logic channels, all in one channel group. */
 		cg = sr_channel_group_new(sdi, "Logic", NULL);
-		for (j = 0; j < NUM_CHANNELS; j++) {
+		for (j = 0; j < (int)prof->logic_channel_count; j++) {
 			sprintf(channel_name, "%d", j);
 			ch = sr_channel_new(sdi, j, SR_CHANNEL_LOGIC,
 						TRUE, channel_name);
@@ -251,11 +315,15 @@ static GSList *scan(struct sr_dev_driver *di, GSList *options)
 		devc = dslogic_dev_new();
 		devc->profile = prof;
 		sdi->priv = devc;
+		if ((ret = dslogic_apply_operation_mode(sdi,
+				prof->default_operation_mode)) != SR_OK) {
+			sr_err("Failed to initialize %s operation mode.", prof->model);
+			sdi->priv = NULL;
+			g_free(devc);
+			sr_dev_inst_free(sdi);
+			continue;
+		}
 		devices = g_slist_append(devices, sdi);
-
-		devc->samplerates = samplerates;
-		devc->num_samplerates = ARRAY_SIZE(samplerates);
-		has_firmware = usb_match_manuf_prod(devlist[i], "DreamSourceLab", "USB-based Instrument");
 
 		if (has_firmware) {
 			/* Already has the firmware, so fix the new address. */
@@ -265,17 +333,7 @@ static GSList *scan(struct sr_dev_driver *di, GSList *options)
 			sdi->conn = sr_usb_dev_inst_new(libusb_get_bus_number(devlist[i]),
 					libusb_get_device_address(devlist[i]), NULL);
 		} else {
-			if (ezusb_upload_firmware(drvc->sr_ctx, devlist[i],
-					USB_CONFIGURATION, prof->firmware) == SR_OK) {
-				/* Store when this device's FW was updated. */
-				devc->fw_updated = g_get_monotonic_time();
-			} else {
-				sr_err("Firmware upload failed for "
-				       "device %d.%d (logical), name %s.",
-				       libusb_get_bus_number(devlist[i]),
-				       libusb_get_device_address(devlist[i]),
-				       prof->firmware);
-			}
+			devc->fw_updated = firmware_updated;
 			sdi->inst_type = SR_INST_USB;
 			sdi->conn = sr_usb_dev_inst_new(libusb_get_bus_number(devlist[i]),
 					0xff, NULL);
@@ -290,13 +348,11 @@ static GSList *scan(struct sr_dev_driver *di, GSList *options)
 static int dev_open(struct sr_dev_inst *sdi)
 {
 	struct sr_dev_driver *di = sdi->driver;
-	struct sr_usb_dev_inst *usb;
 	struct dev_context *devc;
 	int ret;
 	int64_t timediff_us, timediff_ms;
 
 	devc = sdi->priv;
-	usb = sdi->conn;
 
 	/*
 	 * If the firmware was recently uploaded, wait up to MAX_RENUM_DELAY_MS
@@ -309,7 +365,7 @@ static int dev_open(struct sr_dev_inst *sdi)
 		g_usleep(300 * 1000);
 		timediff_ms = 0;
 		while (timediff_ms < MAX_RENUM_DELAY_MS) {
-			if ((ret = dslogic_dev_open(sdi, di)) == SR_OK)
+			if ((ret = dslogic_open_and_claim(sdi, di)) == SR_OK)
 				break;
 			g_usleep(100 * 1000);
 
@@ -324,7 +380,7 @@ static int dev_open(struct sr_dev_inst *sdi)
 		sr_info("Device came back after %" PRIi64 "ms.", timediff_ms);
 	} else {
 		sr_info("Firmware upload was not needed.");
-		ret = dslogic_dev_open(sdi, di);
+		ret = dslogic_open_and_claim(sdi, di);
 	}
 
 	if (ret != SR_OK) {
@@ -332,58 +388,31 @@ static int dev_open(struct sr_dev_inst *sdi)
 		return SR_ERR;
 	}
 
-	ret = libusb_claim_interface(usb->devhdl, USB_INTERFACE);
-	if (ret != 0) {
-		switch (ret) {
-		case LIBUSB_ERROR_BUSY:
-			sr_err("Unable to claim USB interface. Another "
-			       "program or driver has already claimed it.");
-			break;
-		case LIBUSB_ERROR_NO_DEVICE:
-			sr_err("Device has been disconnected.");
-			break;
-		default:
-			sr_err("Unable to claim interface: %s.",
-			       libusb_error_name(ret));
-			break;
-		}
-
-		return SR_ERR;
-	}
-
-
-	if ((ret = dslogic_fpga_firmware_upload(sdi)) != SR_OK)
+	if (devc->operation_mode == DSLOGIC_OPERATION_UNSET &&
+			(ret = dslogic_apply_operation_mode(sdi,
+				devc->profile->default_operation_mode)) != SR_OK)
 		return ret;
 
-	if (devc->cur_samplerate == 0) {
-		/* Samplerate hasn't been set; default to the slowest one. */
-		devc->cur_samplerate = devc->samplerates[0];
-	}
-
-	if (devc->cur_threshold == 0.0) {
+	if (devc->cur_threshold == 0.0)
 		devc->cur_threshold = thresholds[1][0];
-		return dslogic_set_voltage_threshold(sdi, devc->cur_threshold);
+
+	/* Read the device state before ever resetting PROG_B. */
+	if ((ret = dslogic_prepare_fpga(sdi)) != SR_OK) {
+		dslogic_close_and_release(sdi);
+		return ret;
 	}
+	if ((ret = dslogic_set_voltage_threshold(sdi, devc->cur_threshold)) != SR_OK) {
+		dslogic_close_and_release(sdi);
+		return ret;
+	}
+	devc->threshold_needs_apply = FALSE;
 
 	return SR_OK;
 }
 
 static int dev_close(struct sr_dev_inst *sdi)
 {
-	struct sr_usb_dev_inst *usb;
-
-	usb = sdi->conn;
-
-	if (!usb->devhdl)
-		return SR_ERR_BUG;
-
-	sr_info("Closing device on %d.%d (logical) / %s (physical) interface %d.",
-		usb->bus, usb->address, sdi->connection_id, USB_INTERFACE);
-	libusb_release_interface(usb->devhdl, USB_INTERFACE);
-	libusb_close(usb->devhdl);
-	usb->devhdl = NULL;
-
-	return SR_OK;
+	return dslogic_close_and_release(sdi);
 }
 
 static int config_get(uint32_t key, GVariant **data,
@@ -412,6 +441,8 @@ static int config_get(uint32_t key, GVariant **data,
 		*data = g_variant_new_printf("%d.%d", usb->bus, usb->address);
 		break;
 	case SR_CONF_VOLTAGE_THRESHOLD:
+		if (!(devc->profile->capabilities & DSLOGIC_CAP_VOLTAGE_THRESHOLD))
+			return SR_ERR_NA;
 		if (!strcmp(devc->profile->model, "DSLogic")) {
 			if ((idx = std_double_tuple_idx_d0(devc->cur_threshold,
 					ARRAY_AND_SIZE(thresholds))) < 0)
@@ -434,14 +465,27 @@ static int config_get(uint32_t key, GVariant **data,
 	case SR_CONF_EXTERNAL_CLOCK:
 		*data = g_variant_new_boolean(devc->external_clock);
 		break;
-	case SR_CONF_CONTINUOUS:
-		*data = g_variant_new_boolean(devc->continuous_mode);
+	case SR_CONF_DEVICE_MODE:
+		if (!dslogic_profile_operation_supported(devc->profile,
+				devc->operation_mode))
+			return SR_ERR_NA;
+		*data = g_variant_new_string(operation_mode_names[devc->operation_mode]);
+		break;
+	case SR_CONF_RLE:
+		if (!(devc->profile->capabilities & DSLOGIC_CAP_RLE))
+			return SR_ERR_NA;
+		*data = g_variant_new_boolean(devc->rle_mode);
+		break;
+	case SR_CONF_FILTER:
+		if (!(devc->profile->capabilities & DSLOGIC_CAP_FILTER))
+			return SR_ERR_NA;
+		*data = g_variant_new_boolean(devc->filter_mode);
 		break;
 	case SR_CONF_CLOCK_EDGE:
 		idx = devc->clock_edge;
 		if (idx >= (int)ARRAY_SIZE(signal_edges))
 			return SR_ERR_BUG;
-		*data = g_variant_new_string(signal_edges[0]);
+		*data = g_variant_new_string(signal_edges[idx]);
 		break;
 	default:
 		return SR_ERR_NA;
@@ -454,7 +498,8 @@ static int config_set(uint32_t key, GVariant *data,
 	const struct sr_dev_inst *sdi, const struct sr_channel_group *cg)
 {
 	struct dev_context *devc;
-	int idx;
+	enum dslogic_operation_mode operation_mode;
+	int idx, ret;
 	gdouble low, high;
 
 	(void)cg;
@@ -466,32 +511,59 @@ static int config_set(uint32_t key, GVariant *data,
 
 	switch (key) {
 	case SR_CONF_SAMPLERATE:
-		if ((idx = std_u64_idx(data, devc->samplerates, devc->num_samplerates)) < 0)
+		if (devc->operation_mode == DSLOGIC_OPERATION_INTERNAL_TEST)
+			return SR_ERR_NA;
+		if (!samplerate_is_available(sdi, g_variant_get_uint64(data),
+				dslogic_profile_operation_is_stream(devc->profile,
+					devc->operation_mode)))
 			return SR_ERR_ARG;
-		devc->cur_samplerate = devc->samplerates[idx];
+		devc->cur_samplerate = g_variant_get_uint64(data);
 		break;
 	case SR_CONF_LIMIT_SAMPLES:
+		if (devc->operation_mode == DSLOGIC_OPERATION_INTERNAL_TEST)
+			return SR_ERR_NA;
 		devc->limit_samples = g_variant_get_uint64(data);
 		break;
 	case SR_CONF_CAPTURE_RATIO:
+		if (g_variant_get_uint64(data) > 100)
+			return SR_ERR_ARG;
 		devc->capture_ratio = g_variant_get_uint64(data);
 		break;
 	case SR_CONF_VOLTAGE_THRESHOLD:
+		if (!(devc->profile->capabilities & DSLOGIC_CAP_VOLTAGE_THRESHOLD))
+			return SR_ERR_NA;
 		if (!strcmp(devc->profile->model, "DSLogic")) {
 			if ((idx = std_double_tuple_idx(data, ARRAY_AND_SIZE(thresholds))) < 0)
 				return SR_ERR_ARG;
 			devc->cur_threshold = thresholds[idx][0];
-			return dslogic_fpga_firmware_upload(sdi);
+			devc->fpga_needs_upload = TRUE;
 		} else {
 			g_variant_get(data, "(dd)", &low, &high);
-			return dslogic_set_voltage_threshold(sdi, (low + high) / 2.0);
+			if (low > high || low < 0.0 || high > 5.0)
+				return SR_ERR_ARG;
+			devc->cur_threshold = (low + high) / 2.0;
 		}
+		/* A config setter is state-only; apply it in the acquisition path. */
+		devc->threshold_needs_apply = TRUE;
 		break;
 	case SR_CONF_EXTERNAL_CLOCK:
 		devc->external_clock = g_variant_get_boolean(data);
 		break;
-	case SR_CONF_CONTINUOUS:
-		devc->continuous_mode = g_variant_get_boolean(data);
+	case SR_CONF_DEVICE_MODE:
+		if ((ret = operation_mode_from_string(g_variant_get_string(data, NULL),
+				&operation_mode)) != SR_OK)
+			return ret;
+		return dslogic_apply_operation_mode((struct sr_dev_inst *)sdi,
+			operation_mode);
+	case SR_CONF_RLE:
+		if (!(devc->profile->capabilities & DSLOGIC_CAP_RLE))
+			return SR_ERR_NA;
+		devc->rle_mode = g_variant_get_boolean(data);
+		break;
+	case SR_CONF_FILTER:
+		if (!(devc->profile->capabilities & DSLOGIC_CAP_FILTER))
+			return SR_ERR_NA;
+		devc->filter_mode = g_variant_get_boolean(data);
 		break;
 	case SR_CONF_CLOCK_EDGE:
 		if ((idx = std_str_idx(data, ARRAY_AND_SIZE(signal_edges))) < 0)
@@ -519,22 +591,69 @@ static int config_list(uint32_t key, GVariant **data,
 	case SR_CONF_VOLTAGE_THRESHOLD:
 		if (!devc || !devc->profile)
 			return SR_ERR_ARG;
+		if (!(devc->profile->capabilities & DSLOGIC_CAP_VOLTAGE_THRESHOLD))
+			return SR_ERR_NA;
 		if (!strcmp(devc->profile->model, "DSLogic"))
 			*data = std_gvar_thresholds(ARRAY_AND_SIZE(thresholds));
 		else
 			*data = std_gvar_min_max_step_thresholds(0.0, 5.0, 0.1);
 		break;
 	case SR_CONF_SAMPLERATE:
+	{
+		GArray *samplerates;
+
 		if (!devc)
 			return SR_ERR_ARG;
-		*data = std_gvar_samplerates(devc->samplerates, devc->num_samplerates);
+		if (devc->operation_mode == DSLOGIC_OPERATION_INTERNAL_TEST) {
+			*data = std_gvar_samplerates(&devc->cur_samplerate, 1);
+			break;
+		}
+		samplerates = dslogic_profile_samplerates_for_operation(devc->profile,
+			enabled_channel_count(sdi), dslogic_profile_operation_is_stream(
+				devc->profile, devc->operation_mode));
+		if (!samplerates)
+			return SR_ERR_MALLOC;
+		*data = std_gvar_samplerates((const uint64_t *)samplerates->data,
+			samplerates->len);
+		g_array_unref(samplerates);
 		break;
+	}
 	case SR_CONF_TRIGGER_MATCH:
 		*data = std_gvar_array_i32(ARRAY_AND_SIZE(trigger_matches));
 		break;
 	case SR_CONF_CLOCK_EDGE:
 		*data = g_variant_new_strv(ARRAY_AND_SIZE(signal_edges));
 		break;
+	case SR_CONF_RLE:
+	case SR_CONF_FILTER:
+		if (!devc || !devc->profile)
+			return SR_ERR_ARG;
+	if (key == SR_CONF_RLE &&
+				!(devc->profile->capabilities & DSLOGIC_CAP_RLE))
+			return SR_ERR_NA;
+		if (key == SR_CONF_FILTER &&
+				!(devc->profile->capabilities & DSLOGIC_CAP_FILTER))
+			return SR_ERR_NA;
+		*data = g_variant_new_boolean(TRUE);
+		break;
+	case SR_CONF_DEVICE_MODE:
+	{
+		const gchar *modes[4];
+		size_t count = 0;
+		enum dslogic_operation_mode operation_mode;
+
+		if (!devc || !devc->profile)
+			return SR_ERR_ARG;
+		for (operation_mode = DSLOGIC_OPERATION_BUFFER;
+				operation_mode <= DSLOGIC_OPERATION_INTERNAL_TEST;
+				operation_mode++) {
+			if (dslogic_profile_operation_supported(devc->profile,
+					operation_mode))
+				modes[count++] = operation_mode_names[operation_mode];
+		}
+		*data = g_variant_new_strv(modes, count);
+		break;
+	}
 	default:
 		return SR_ERR_NA;
 	}

@@ -1,0 +1,5 @@
+Synthetic DSLogic cross layout, two atomic blocks, physical channels 0 through 15 in ascending order.
+Each channel word is its repeated ASCII marker from A through P, encoded little-endian on the wire.
+The second block uses markers Q through Z then 0 through 4; its last word has seven 0x35 bytes followed by the fixture's terminal 0x0a byte.
+For sample index s in block b (s=b*64 through b*64+63), expected packed bit for physical channel c is bit (s mod 64) of its c-th 64-bit word in block b.
+Expected total sample count: 128. Output unitsize: 2 bytes.

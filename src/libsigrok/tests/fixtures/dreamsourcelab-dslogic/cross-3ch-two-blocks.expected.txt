@@ -1,0 +1,6 @@
+Synthetic DSLogic cross layout, 3 physical channels, three 64-sample blocks.
+Block 0 words: channel 0=0x4141414141414141, channel 1=0x4242424242424242, channel 2=0x4444444444444444.
+Block 1 words: channel 0=0x5050505050505050, channel 1=0x5151515151515151, channel 2=0x5252525252525252.
+Block 2 words: channel 0=0x5353535353535353, channel 1=0x5454545454545454, channel 2 has seven 0x55 bytes followed by the fixture's terminal 0x0a byte.
+For sample index s in block b (s=b*64 through b*64+63), expected packed bit for physical channel c is bit (s mod 64) of that block's listed c word.
+Expected total sample count: 192. Output unitsize: 1 byte.

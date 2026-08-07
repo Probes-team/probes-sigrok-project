@@ -353,6 +353,8 @@ if HW_DREAMSOURCELAB_DSLOGIC
 src_libdrivers_la_SOURCES += \
 	src/hardware/dreamsourcelab-dslogic/protocol.h \
 	src/hardware/dreamsourcelab-dslogic/protocol.c \
+	src/hardware/dreamsourcelab-dslogic/profiles.h \
+	src/hardware/dreamsourcelab-dslogic/profiles.c \
 	src/hardware/dreamsourcelab-dslogic/api.c
 endif
 if HW_FLUKE_45
@@ -888,7 +890,11 @@ tests_main_SOURCES = \
 	tests/device.c \
 	tests/trigger.c \
 	tests/analog.c \
-	tests/conv.c
+	tests/conv.c \
+	tests/dreamsourcelab_dslogic.c
+
+tests_main_CPPFLAGS = $(AM_CPPFLAGS) \
+	-DDSLOGIC_TEST_FIXTURE_DIR='"$(abs_srcdir)/tests/fixtures/dreamsourcelab-dslogic"'
 
 tests_main_LDADD = libsigrok.la $(SR_EXTRA_LIBS) $(TESTS_LIBS)
 
