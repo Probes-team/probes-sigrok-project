@@ -658,28 +658,27 @@ int opt_to_gvar(char *key, char *value, struct sr_config *src)
 	return ret;
 }
 
-int set_dev_options_array(struct sr_dev_inst *sdi, char **opts)
+static gboolean config_key_in_phase(const char *key,
+		enum config_apply_phase phase)
 {
-	size_t opt_idx;
-	const char *opt_text;
-	GHashTable *args;
-	int ret;
+	const struct sr_key_info *srci;
 
-	for (opt_idx = 0; opts && opts[opt_idx]; opt_idx++) {
-		opt_text = opts[opt_idx];
-		args = parse_generic_arg(opt_text, FALSE, "channel_group");
-		if (!args)
-			continue;
-		ret = set_dev_options(sdi, args);
-		g_hash_table_destroy(args);
-		if (ret != SR_OK)
-			return ret;
-	}
+	if (phase == CONFIG_APPLY_ALL)
+		return TRUE;
 
-	return SR_OK;
+	srci = sr_key_info_name_get(SR_KEY_CONFIG, key);
+	/* Leave unknown keys in both passes so the normal parser reports them. */
+	if (!srci)
+		return TRUE;
+
+	if (phase == CONFIG_APPLY_DEVICE_MODE)
+		return srci->key == SR_CONF_DEVICE_MODE;
+
+	return srci->key != SR_CONF_DEVICE_MODE;
 }
 
-int set_dev_options(struct sr_dev_inst *sdi, GHashTable *args)
+static int set_dev_options_phase(struct sr_dev_inst *sdi, GHashTable *args,
+		enum config_apply_phase phase)
 {
 	struct sr_config src;
 	const char *cg_name;
@@ -689,17 +688,16 @@ int set_dev_options(struct sr_dev_inst *sdi, GHashTable *args)
 	int ret;
 
 	/*
-	 * Not finding the 'sigrok_key' key (optional user specified
-	 * channel group name) in the current options group's hash table
-	 * is perfectly fine. In that case the -g selection is used,
-	 * which defaults to "the device" (global parameters).
+	 * A device-mode transition may reset the active channels. Apply it before
+	 * channel selection, then validate all channel-dependent options after.
 	 */
 	cg_name = g_hash_table_lookup(args, "sigrok_key");
 	cg = lookup_channel_group(sdi, cg_name);
 
 	g_hash_table_iter_init(&iter, args);
 	while (g_hash_table_iter_next(&iter, &key, &value)) {
-		if (g_ascii_strcasecmp(key, "sigrok_key") == 0)
+		if (g_ascii_strcasecmp(key, "sigrok_key") == 0 ||
+				!config_key_in_phase(key, phase))
 			continue;
 		if ((ret = opt_to_gvar(key, value, &src)) != 0)
 			return ret;
@@ -712,6 +710,38 @@ int set_dev_options(struct sr_dev_inst *sdi, GHashTable *args)
 	}
 
 	return SR_OK;
+}
+
+int set_dev_options_array_phase(struct sr_dev_inst *sdi, char **opts,
+		enum config_apply_phase phase)
+{
+	size_t opt_idx;
+	const char *opt_text;
+	GHashTable *args;
+	int ret;
+
+	for (opt_idx = 0; opts && opts[opt_idx]; opt_idx++) {
+		opt_text = opts[opt_idx];
+		args = parse_generic_arg(opt_text, FALSE, "channel_group");
+		if (!args)
+			continue;
+		ret = set_dev_options_phase(sdi, args, phase);
+		g_hash_table_destroy(args);
+		if (ret != SR_OK)
+			return ret;
+	}
+
+	return SR_OK;
+}
+
+int set_dev_options_array(struct sr_dev_inst *sdi, char **opts)
+{
+	return set_dev_options_array_phase(sdi, opts, CONFIG_APPLY_ALL);
+}
+
+int set_dev_options(struct sr_dev_inst *sdi, GHashTable *args)
+{
+	return set_dev_options_phase(sdi, args, CONFIG_APPLY_ALL);
 }
 
 void run_session(void)
@@ -800,13 +830,19 @@ void run_session(void)
 		return;
 	}
 
-	if (opt_configs) {
-		if (set_dev_options_array(sdi, opt_configs) != SR_OK)
-			return;
+	if (opt_configs && set_dev_options_array_phase(sdi, opt_configs,
+			CONFIG_APPLY_DEVICE_MODE) != SR_OK) {
+		sr_session_destroy(session);
+		return;
 	}
 
 	if (select_channels(sdi) != SR_OK) {
 		g_critical("Failed to set channels.");
+		sr_session_destroy(session);
+		return;
+	}
+	if (opt_configs && set_dev_options_array_phase(sdi, opt_configs,
+			CONFIG_APPLY_REMAINING) != SR_OK) {
 		sr_session_destroy(session);
 		return;
 	}

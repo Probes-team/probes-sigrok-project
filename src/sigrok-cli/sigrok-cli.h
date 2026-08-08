@@ -77,7 +77,16 @@ struct df_arg_desc {
 void datafeed_in(const struct sr_dev_inst *sdi,
 		const struct sr_datafeed_packet *packet, void *cb_data);
 int opt_to_gvar(char *key, char *value, struct sr_config *src);
+
+enum config_apply_phase {
+	CONFIG_APPLY_ALL,
+	CONFIG_APPLY_DEVICE_MODE,
+	CONFIG_APPLY_REMAINING,
+};
+
 int set_dev_options_array(struct sr_dev_inst *sdi, char **opts);
+int set_dev_options_array_phase(struct sr_dev_inst *sdi, char **opts,
+		enum config_apply_phase phase);
 int set_dev_options(struct sr_dev_inst *sdi, GHashTable *args);
 void run_session(void);
 

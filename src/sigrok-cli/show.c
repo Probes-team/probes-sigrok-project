@@ -451,15 +451,22 @@ void show_dev_detail(void)
 	}
 
 	/*
-	 * Selected channels and channel group may affect which options are
-	 * returned, or which values for them.
+	 * A device-mode transition may change enabled channels. Apply it before
+	 * the requested channel selection, then list the resulting configuration.
 	 */
-	select_channels(sdi);
+	if (set_dev_options_array_phase(sdi, opt_configs,
+			CONFIG_APPLY_DEVICE_MODE) != SR_OK)
+		goto close_device;
+	if (select_channels(sdi) != SR_OK)
+		goto close_device;
+	if (set_dev_options_array_phase(sdi, opt_configs,
+			CONFIG_APPLY_REMAINING) != SR_OK)
+		goto close_device;
 	channel_group = lookup_channel_group(sdi, NULL);
 
 	if (!(opts = sr_dev_options(driver, sdi, channel_group)))
 		/* Driver supports no device instance options. */
-		return;
+		goto close_device;
 
 	if (channel_groups) {
 		printf("Channel groups:\n");
@@ -852,6 +859,7 @@ void show_dev_detail(void)
 	}
 	g_array_free(opts, TRUE);
 
+close_device:
 	sr_dev_close(sdi);
 
 }

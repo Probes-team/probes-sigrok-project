@@ -180,8 +180,14 @@ static void get_options(void)
 		return;
 	}
 
-	/* Set configuration values when -c was specified. */
-	set_dev_options_array(sdi, opt_configs);
+	if (set_dev_options_array_phase(sdi, opt_configs,
+			CONFIG_APPLY_DEVICE_MODE) != SR_OK)
+		goto close_device;
+	if (select_channels(sdi) != SR_OK)
+		goto close_device;
+	if (set_dev_options_array_phase(sdi, opt_configs,
+			CONFIG_APPLY_REMAINING) != SR_OK)
+		goto close_device;
 
 	/* Get configuration values which were specified by --get. */
 	for (get_idx = 0; (get_text = opt_gets[get_idx]); get_idx++) {
@@ -198,6 +204,7 @@ static void get_options(void)
 		}
 	}
 
+close_device:
 	/* Close the device. */
 	sr_dev_close(sdi);
 }
