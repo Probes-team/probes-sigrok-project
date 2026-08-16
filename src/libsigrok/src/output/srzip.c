@@ -186,35 +186,6 @@ static int zip_create(const struct sr_output *o)
 		}
 	}
 
-	/*
-	 * Allocate one samples buffer for all logic channels, and
-	 * several samples buffers for the analog channels. Allocate
-	 * buffers of CHUNK_SIZE size (in bytes), and determine the
-	 * sample counts from the respective channel counts and data
-	 * type widths.
-	 *
-	 * These buffers are intended to reduce the number of ZIP
-	 * archive update calls, and decouple the srzip output module
-	 * from implementation details in other acquisition device
-	 * drivers and input modules.
-	 *
-	 * Avoid allocating zero bytes, to not depend on platform
-	 * specific malloc(0) return behaviour. Avoid division by zero,
-	 * holding a local buffer won't harm when no data is seen later
-	 * during execution. This simplifies other locations.
-	 */
-	alloc_size = CHUNK_SIZE;
-	outc->logic_buff.zip_unit_size = logic_channels;
-	outc->logic_buff.zip_unit_size += 8 - 1;
-	outc->logic_buff.zip_unit_size /= 8;
-	outc->logic_buff.samples = g_try_malloc0(alloc_size);
-	if (!outc->logic_buff.samples)
-		return SR_ERR_MALLOC;
-	if (outc->logic_buff.zip_unit_size)
-		alloc_size /= outc->logic_buff.zip_unit_size;
-	outc->logic_buff.alloc_size = alloc_size;
-	outc->logic_buff.fill_size = 0;
-
 	alloc_size = sizeof(outc->analog_buff[0]) * outc->analog_ch_count + 1;
 	outc->analog_buff = g_malloc0(alloc_size);
 	for (index = 0; index < outc->analog_ch_count; index++) {
@@ -247,6 +218,27 @@ static int zip_create(const struct sr_output *o)
 		return SR_ERR;
 	}
 	g_free(metabuf);
+
+	return SR_OK;
+}
+
+/* The first logic packet defines the session-wide packed sample layout. */
+static int logic_buffer_init(struct out_context *outc, size_t unitsize)
+{
+	size_t alloc_size;
+
+	if (!unitsize)
+		return SR_ERR_ARG;
+	if (outc->logic_buff.zip_unit_size)
+		return outc->logic_buff.zip_unit_size == unitsize ? SR_OK : SR_ERR_DATA;
+
+	alloc_size = MAX((size_t)CHUNK_SIZE, unitsize);
+	outc->logic_buff.samples = g_try_malloc(alloc_size);
+	if (!outc->logic_buff.samples)
+		return SR_ERR_MALLOC;
+	outc->logic_buff.zip_unit_size = unitsize;
+	outc->logic_buff.alloc_size = alloc_size / unitsize;
+	outc->logic_buff.fill_size = 0;
 
 	return SR_OK;
 }
@@ -399,58 +391,27 @@ static int zip_append_queue(const struct sr_output *o,
 	const uint8_t *buf, size_t feed_unitsize, size_t length,
 	gboolean flush)
 {
-	static gboolean sizes_seen;
-
 	struct out_context *outc;
 	struct logic_buff *buff;
-	size_t sample_copy_size, sample_skip_size, sample_pad_size;
 	size_t send_count, remain, copy_count;
 	const uint8_t *rdptr;
 	uint8_t *wrptr;
 	int ret;
 
-	/*
-	 * Check input parameters. Prepare to either grab data as is,
-	 * or to adjust between differing input and output unit sizes.
-	 * Diagnostics is rate limited for improved usability, assumes
-	 * that session feeds are consistent across calls. Processing
-	 * would cope with inconsistent calls though when required.
-	 */
 	outc = o->priv;
 	buff = &outc->logic_buff;
 	if (length) {
-		if (!sizes_seen) {
-			sr_info("output unit size %zu, feed unit size %zu.",
-				buff->zip_unit_size, feed_unitsize);
+		if (!feed_unitsize || length % feed_unitsize) {
+			sr_err("Logic data length %zu is not aligned to unit size %zu.",
+				length, feed_unitsize);
+			return SR_ERR_DATA;
 		}
-		if (feed_unitsize > buff->zip_unit_size) {
-			if (!sizes_seen)
-				sr_info("Large unit size, discarding excess logic data.");
-			sample_copy_size = buff->zip_unit_size;
-			sample_skip_size = feed_unitsize - buff->zip_unit_size;
-			sample_pad_size = 0;
-		} else if (feed_unitsize < buff->zip_unit_size) {
-			if (!sizes_seen)
-				sr_info("Small unit size, padding logic data.");
-			sample_copy_size = feed_unitsize;
-			sample_skip_size = 0;
-			sample_pad_size = buff->zip_unit_size - feed_unitsize;
-		} else {
-			if (!sizes_seen)
-				sr_dbg("Matching unit size, passing logic data as is.");
-			sample_copy_size = buff->zip_unit_size;
-			sample_skip_size = 0;
-			sample_pad_size = 0;
+		if ((ret = logic_buffer_init(outc, feed_unitsize)) != SR_OK) {
+			if (ret == SR_ERR_DATA)
+				sr_err("Logic data unit size changed from %zu to %zu.",
+					buff->zip_unit_size, feed_unitsize);
+			return ret;
 		}
-		if (sample_copy_size + sample_skip_size != feed_unitsize) {
-			sr_err("Inconsistent input unit size. Implementation flaw?");
-			return SR_ERR_BUG;
-		}
-		if (sample_copy_size + sample_pad_size != buff->zip_unit_size) {
-			sr_err("Inconsistent output unit size. Implementation flaw?");
-			return SR_ERR_BUG;
-		}
-		sizes_seen = TRUE;
 	}
 
 	/*
@@ -464,18 +425,10 @@ static int zip_append_queue(const struct sr_output *o,
 		wrptr = &buff->samples[buff->fill_size * buff->zip_unit_size];
 		if (remain) {
 			copy_count = MIN(send_count, remain);
-			if (sample_skip_size || sample_pad_size)
-				copy_count = 1;
 			send_count -= copy_count;
 			buff->fill_size += copy_count;
-			memcpy(wrptr, rdptr, copy_count * sample_copy_size);
-			if (sample_pad_size) {
-				wrptr += sample_copy_size;
-				memset(wrptr, 0, sample_pad_size);
-			}
-			rdptr += copy_count * sample_copy_size;
-			if (sample_skip_size)
-				rdptr += sample_skip_size;
+			memcpy(wrptr, rdptr, copy_count * buff->zip_unit_size);
+			rdptr += copy_count * buff->zip_unit_size;
 			remain -= copy_count;
 		}
 		if (send_count && !remain) {

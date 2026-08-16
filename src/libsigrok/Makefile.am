@@ -755,6 +755,14 @@ src_libdrivers_la_SOURCES += \
 	src/hardware/uni-t-ut32x/protocol.c \
 	src/hardware/uni-t-ut32x/api.c
 endif
+if HW_WCH_CH32H417
+src_libdrivers_la_SOURCES += \
+	src/hardware/wch-ch32h417/protocol.h \
+	src/hardware/wch-ch32h417/protocol.c \
+	src/hardware/wch-ch32h417/ch375_wrapper.h \
+	src/hardware/wch-ch32h417/ch375_wrapper.c \
+	src/hardware/wch-ch32h417/api.c
+endif
 if HW_YOKOGAWA_DLM
 src_libdrivers_la_SOURCES += \
 	src/hardware/yokogawa-dlm/protocol.h \

@@ -27,4 +27,12 @@ function Copy-PackageLicenses {
             Copy-Item -LiteralPath $_.FullName -Destination $destination -Force
         }
     }
+
+    $wchLicense = Join-Path $ProjectRoot 'third_party/wch-ch375/LICENSE.txt'
+    if (-not (Test-Path -LiteralPath $wchLicense)) {
+        throw "Missing WCH CH375 license: $wchLicense"
+    }
+    $wchDestination = Join-Path $licenseRoot 'third_party/wch-ch375/LICENSE.txt'
+    New-Item -ItemType Directory -Force -Path (Split-Path -Parent $wchDestination) | Out-Null
+    Copy-Item -LiteralPath $wchLicense -Destination $wchDestination -Force
 }

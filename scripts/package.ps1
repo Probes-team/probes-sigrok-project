@@ -17,10 +17,22 @@ $toolchain = Get-ToolchainConfig -ProjectRoot $projectRoot
 $stageRoot = Join-Path $projectRoot '.work/stage/probes-sigrok'
 $buildManifestPath = Join-Path $projectRoot '.work/build-manifest.json'
 $firmwareRoot = Join-Path $projectRoot 'src/sigrok-firmware'
-foreach ($required in @($stageRoot, $buildManifestPath, $firmwareRoot)) {
+$wchRoot = Join-Path $projectRoot 'third_party/wch-ch375'
+$wchDllSource = Join-Path $wchRoot 'CH375DLL64.DLL'
+$wchProvenance = Join-Path $wchRoot 'PROVENANCE.md'
+foreach ($required in @($stageRoot, $buildManifestPath, $firmwareRoot, $wchDllSource, $wchProvenance)) {
     if (-not (Test-Path -LiteralPath $required)) {
         throw "Required package input is missing: $required"
     }
+}
+$wchHash = (Get-FileHash -LiteralPath $wchDllSource -Algorithm SHA256).Hash.ToUpperInvariant()
+$provenanceText = Get-Content -LiteralPath $wchProvenance -Raw
+$provenanceHash = [regex]::Match(
+    $provenanceText,
+    '(?im)^- SHA-256:\s*`?([A-F0-9]{64})`?\s*$'
+).Groups[1].Value.ToUpperInvariant()
+if ($provenanceHash -ne $wchHash) {
+    throw "CH375DLL64.DLL does not match third_party/wch-ch375/PROVENANCE.md: $wchHash"
 }
 
 $distRoot = Join-Path $projectRoot "dist/probes-sigrok-$Version"
@@ -35,6 +47,7 @@ Copy-Item -LiteralPath (Join-Path $stageBin 'sigrok-cli.exe') -Destination $pack
 Get-ChildItem -LiteralPath $stageBin -Filter '*.dll' -File | ForEach-Object {
     Copy-Item -LiteralPath $_.FullName -Destination $packageRoot
 }
+Copy-Item -LiteralPath $wchDllSource -Destination (Join-Path $packageRoot 'CH375DLL64.DLL')
 
 $decoderRoot = Join-Path $stageRoot 'share/libsigrokdecode/decoders'
 if (-not (Test-Path -LiteralPath $decoderRoot)) {

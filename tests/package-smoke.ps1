@@ -10,6 +10,10 @@ $exe = Join-Path $PackagePath 'sigrok-cli.exe'
 if (-not (Test-Path -LiteralPath $exe)) {
     throw "Package CLI is missing: $exe"
 }
+$wchDll = Join-Path $PackagePath 'CH375DLL64.DLL'
+if (-not (Test-Path -LiteralPath $wchDll)) {
+    throw "Packaged WCH runtime DLL is missing: $wchDll"
+}
 
 $temporaryRoot = Join-Path ([IO.Path]::GetTempPath()) ("probes-sigrok-smoke-" + [guid]::NewGuid())
 New-Item -ItemType Directory -Force -Path $temporaryRoot | Out-Null

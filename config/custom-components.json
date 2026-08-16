@@ -1,5 +1,11 @@
 {
   "schemaVersion": 1,
-  "drivers": [],
+  "drivers": [
+    {
+      "id": "wch-ch32h417",
+      "arguments": ["--list-supported"],
+      "expect": ["(?m)^\\s{2}wch-ch32h417\\s"]
+    }
+  ],
   "decoders": []
 }

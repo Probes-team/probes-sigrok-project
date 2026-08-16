@@ -31,4 +31,10 @@ function New-SourceDisclosure {
     Copy-Item -LiteralPath (Join-Path $ProjectRoot 'upstream-manifest.json') -Destination $disclosureRoot
     Copy-Item -LiteralPath (Join-Path $ProjectRoot 'licenses') -Destination $disclosureRoot -Recurse -Force
     Copy-Item -LiteralPath (Join-Path $ProjectRoot 'licenses/THIRD_PARTY_NOTICES.md') -Destination $disclosureRoot
+
+    $wchSource = Join-Path $ProjectRoot 'third_party/wch-ch375'
+    if (-not (Test-Path -LiteralPath $wchSource)) {
+        throw 'Missing source disclosure component: third_party/wch-ch375'
+    }
+    Copy-DirectoryContents -Source $wchSource -Destination (Join-Path $disclosureRoot 'wch-ch375')
 }

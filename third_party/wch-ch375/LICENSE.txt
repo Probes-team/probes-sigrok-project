@@ -1,0 +1,10 @@
+WCH CH375DLL64.DLL redistribution notice
+
+This file accompanies the vendor-supplied CH375DLL64.DLL runtime used by the
+WCH CH32H417 logic-analyzer driver. The binary is distributed as a runtime
+component of this local Sigrok package under the project owner's approved
+CH32H417 integration policy.
+
+The binary remains a WCH vendor component. Its vendor terms and copyright
+notices apply; this notice does not relicense the DLL or the WCH kernel driver.
+The source and checksum record for this exact binary are in PROVENANCE.md.

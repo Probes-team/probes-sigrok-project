@@ -19,3 +19,10 @@ bitstreams plus `DSLogic.fw` and `DSLogicPro.fw` come from v1.3.2
 `DSLogicPlus.fw` come from the earlier public revision
 `f17c612cb1d600a50ca4cdf804967770364b4f08`. Their file-level provenance and
 checksums are recorded in `config/dreamsourcelab-dslogic-firmware.json`.
+
+The WCH CH32H417 driver dynamically uses the vendor-supplied
+`CH375DLL64.DLL`. The exact binary is shipped at the package root next to
+`sigrok-cli.exe`; its source record, checksum, and distribution notice are
+provided in `source-disclosure/wch-ch375/PROVENANCE.md` and
+`source-disclosure/wch-ch375/LICENSE.txt`. The local staging record is kept in
+`third_party/wch-ch375/`.

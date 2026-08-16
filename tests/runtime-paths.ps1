@@ -3,6 +3,10 @@ param([Parameter(Mandatory)][string]$PackagePath)
 
 $ErrorActionPreference = 'Stop'
 $exe = Join-Path $PackagePath 'sigrok-cli.exe'
+$wchDll = Join-Path $PackagePath 'CH375DLL64.DLL'
+if (-not (Test-Path -LiteralPath $wchDll)) {
+    throw "Packaged WCH runtime DLL is missing: $wchDll"
+}
 $oldPath = $env:PATH
 $oldPythonHome = $env:PYTHONHOME
 $oldDecoderDir = $env:SIGROKDECODE_DIR
