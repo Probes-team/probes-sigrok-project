@@ -56,10 +56,8 @@ struct dev_context {
 	int num_samplerates;
 	uint64_t cur_samplerate;
 	uint64_t limit_samples;
-	uint64_t limit_frames;
 	uint64_t capture_ratio;
 	uint64_t sent_samples;
-	uint64_t num_frames;
 	uint8_t sample_width;
 	uint8_t num_channels;
 	gboolean is_usb2;

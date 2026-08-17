@@ -55,7 +55,6 @@ SR_PRIV struct dev_context *ch32h417_dev_new(void)
 	devc = g_malloc0(sizeof(*devc));
 	devc->num_channels = 16;
 	devc->sample_width = SAMPLE_WIDTH_16BIT;
-	devc->limit_frames = 1;
 	devc->device_index = -1;
 	devc->device_handle = CH375_INVALID_HANDLE;
 	devc->buffer_size = BUFFER_UPLOAD_SIZE;
@@ -251,12 +250,8 @@ static gboolean send_logic_data(struct sr_dev_inst *sdi, uint8_t *data,
 		devc->sent_samples += emit_count;
 
 		if (devc->limit_samples && devc->sent_samples == devc->limit_samples) {
-			devc->num_frames++;
-			devc->sent_samples = 0;
-			if (devc->limit_frames && devc->num_frames >= devc->limit_frames) {
-				mark_acquisition_finished(devc);
-				return FALSE;
-			}
+			mark_acquisition_finished(devc);
+			return FALSE;
 		}
 	}
 	return TRUE;
@@ -352,7 +347,6 @@ SR_PRIV int ch32h417_acquisition_start(const struct sr_dev_inst *sdi_const)
 	if (devc->read_thread)
 		return SR_ERR;
 	devc->sent_samples = 0;
-	devc->num_frames = 0;
 	devc->end_sent = FALSE;
 	devc->acq_aborted = FALSE;
 	devc->acq_finished = FALSE;

@@ -130,7 +130,7 @@ static GSList *scan(struct sr_dev_driver *di, GSList *options)
 	GSList *devices, *l;
 	struct sr_config *src;
 	size_t argc, chmax, chidx;
-	gchar **argv, *output, *vers_text, *eol;
+	gchar **argv, *exe_path, *output, *vers_text, *eol;
 	GSpawnFlags flags;
 	GError *error;
 	gboolean ok;
@@ -184,12 +184,18 @@ static GSList *scan(struct sr_dev_driver *di, GSList *options)
 	exe = getenv("OMEGARTMCLI");
 	if (!exe || !*exe)
 		exe = "omegartmcli";
-	sr_dbg("Vendor application executable: %s", exe);
+	exe_path = g_find_program_in_path(exe);
+	if (!exe_path) {
+		sr_dbg("Vendor application executable is unavailable: %s", exe);
+		return std_scan_complete(di, devices);
+	}
+	sr_dbg("Vendor application executable: %s", exe_path);
 	argv = g_malloc0(5 * sizeof(argv[0]));
 	argc = 0;
-	argv[argc++] = g_strdup(exe);
+	argv[argc++] = g_strdup(exe_path);
 	argv[argc++] = g_strdup("-version");
 	argv[argc++] = NULL;
+	g_free(exe_path);
 	flags = G_SPAWN_SEARCH_PATH | G_SPAWN_STDERR_TO_DEV_NULL;
 	output = NULL;
 	error = NULL;

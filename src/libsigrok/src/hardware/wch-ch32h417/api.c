@@ -29,7 +29,6 @@ static const uint32_t drvopts[] = {
 
 static const uint32_t devopts[] = {
 	SR_CONF_CONTINUOUS,
-	SR_CONF_LIMIT_FRAMES | SR_CONF_GET | SR_CONF_SET,
 	SR_CONF_LIMIT_SAMPLES | SR_CONF_GET | SR_CONF_SET,
 	SR_CONF_CONN | SR_CONF_GET,
 	SR_CONF_SAMPLERATE | SR_CONF_GET | SR_CONF_SET | SR_CONF_LIST,
@@ -202,9 +201,6 @@ static int config_get(uint32_t key, GVariant **data,
 	case SR_CONF_CONN:
 		*data = g_variant_new_string(sdi->connection_id);
 		break;
-	case SR_CONF_LIMIT_FRAMES:
-		*data = g_variant_new_uint64(devc->limit_frames);
-		break;
 	case SR_CONF_LIMIT_SAMPLES:
 		*data = g_variant_new_uint64(devc->limit_samples);
 		break;
@@ -215,7 +211,7 @@ static int config_get(uint32_t key, GVariant **data,
 		*data = g_variant_new_uint64(devc->capture_ratio);
 		break;
 	case SR_CONF_NUM_LOGIC_CHANNELS:
-		*data = g_variant_new_uint64(devc->num_channels);
+		*data = g_variant_new_int32(devc->num_channels);
 		break;
 	case SR_CONF_PATTERN_MODE:
 		*data = g_variant_new_string(pattern_modes[0]);
@@ -231,6 +227,7 @@ static int config_set(uint32_t key, GVariant *data,
 {
 	struct dev_context *devc;
 	uint64_t value;
+	int32_t num_channels;
 	int index;
 
 	(void)cg;
@@ -238,9 +235,6 @@ static int config_set(uint32_t key, GVariant *data,
 		return SR_ERR_ARG;
 	devc = sdi->priv;
 	switch (key) {
-	case SR_CONF_LIMIT_FRAMES:
-		devc->limit_frames = g_variant_get_uint64(data);
-		return SR_OK;
 	case SR_CONF_LIMIT_SAMPLES:
 		devc->limit_samples = g_variant_get_uint64(data);
 		return SR_OK;
@@ -260,11 +254,11 @@ static int config_set(uint32_t key, GVariant *data,
 		}
 		return SR_ERR_ARG;
 	case SR_CONF_NUM_LOGIC_CHANNELS:
-		value = g_variant_get_uint64(data);
-		if (value != 8 && value != 16)
+		num_channels = g_variant_get_int32(data);
+		if (num_channels != 8 && num_channels != 16)
 			return SR_ERR_ARG;
-		devc->num_channels = value;
-		devc->sample_width = value == 8 ? SAMPLE_WIDTH_8BIT : SAMPLE_WIDTH_16BIT;
+		devc->num_channels = num_channels;
+		devc->sample_width = num_channels == 8 ? SAMPLE_WIDTH_8BIT : SAMPLE_WIDTH_16BIT;
 		ch32h417_update_samplerates(devc);
 		return SR_OK;
 	case SR_CONF_PATTERN_MODE:
