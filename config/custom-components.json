@@ -7,5 +7,66 @@
       "expect": ["(?m)^\\s{2}wch-ch32h417\\s"]
     }
   ],
-  "decoders": []
+  "decoders": [
+    {
+      "id": "c2",
+      "fixture": "c2-basic.sr",
+      "arguments": [
+        "-i", "{fixture}",
+        "-P", "c2:c2ck=logic.c2ck:c2d=logic.c2d",
+        "-A", "c2=c2-data-row:raw-data-row"
+      ],
+      "expect": ["Reset", "Start", "WriteAddress\\(0x22\\)"]
+    },
+    {
+      "id": "mipi_dsi",
+      "fixture": "mipi-dsi-basic.sr",
+      "arguments": [
+        "-i", "{fixture}",
+        "-P", "mipi_dsi:D0N=logic.d0n:D0P=logic.d0p",
+        "-A", "mipi_dsi=LP:LPData"
+      ],
+      "expect": ["Escape mode entry", "0xCA", "Stop"]
+    },
+    {
+      "id": "can-fd",
+      "fixture": "can-fd-basic.sr",
+      "arguments": [
+        "-i", "{fixture}",
+        "-P", "can-fd:can_rx=logic.can_rx:nominal_bitrate=1000000:fast_bitrate=1000000:sample_point=70.0",
+        "-A", "can-fd=fields:warnings-row:data"
+      ],
+      "expect": ["Identifier: 291", "Flexible data format: 1", "Bit rate switch: 1", "Data byte 0: 0xa5"]
+    },
+    {
+      "id": "a7105",
+      "fixture": "a7105-basic.sr",
+      "arguments": [
+        "-I", "protocoldata", "-i", "{fixture}",
+        "-P", "spi:clk=sck:miso=miso:mosi=mosi:cs=cs:cpol=0:cpha=0:bitorder=msb-first:wordsize=8,a7105",
+        "-A", "a7105=commands"
+      ],
+      "expect": ["DATA_RATE", "TX FIFO"]
+    },
+    {
+      "id": "spi_tpm",
+      "fixture": "spi-tpm-basic.sr",
+      "arguments": [
+        "-I", "protocoldata", "-i", "{fixture}",
+        "-P", "spi:clk=sck:miso=miso:mosi=mosi:cs=cs:cpol=0:cpha=0:bitorder=msb-first:wordsize=8,spi_tpm:tpm_version=2.0",
+        "-A", "spi_tpm=Transactions"
+      ],
+      "expect": ["Read", "Write", "Wait", "TPM_DATA_FIFO_0"]
+    },
+    {
+      "id": "ufcs",
+      "fixture": "ufcs-basic.sr",
+      "arguments": [
+        "-I", "protocoldata", "-i", "{fixture}",
+        "-P", "uart:rx=rxtx:baudrate=1000000:data_bits=8:parity=none:stop_bits=1.0:bit_order=lsb-first,ufcs:fulltext=yes",
+        "-A", "ufcs=phase:type-row:warnings-row:text-row"
+      ],
+      "expect": ["PING", "ACCEPT", "OUTPUT CAP", "Bad CRC"]
+    }
+  ]
 }

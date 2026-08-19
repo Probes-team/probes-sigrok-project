@@ -1,0 +1,18 @@
+# -- sigrok protocol data values file --
+# -- sigrok protocol data header start --
+protocol=uart
+bitrate=1000000
+frameformat=8n1
+textinput=yes
+# -- sigrok protocol data header end --
+# Synthetic UFCS stream; generated from the UFCS packet layout and CRC-8/0x29.
+# Generated channel: rxtx, sampled at 10 MHz by protocoldata.
+# textinput: radix=16
+# Source PING control packet, valid CRC.
+aa 20 00 00 94
+# Sink ACCEPT control packet, valid CRC.
+aa 40 00 03 7a
+# Source-capability data packet with an all-zero synthetic PDO and valid CRC.
+aa 20 01 01 08 00 00 00 00 00 00 00 00 0a
+# Deliberately invalid CRC, to validate the warning path.
+aa 20 00 00 00

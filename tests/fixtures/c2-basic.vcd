@@ -1,0 +1,74 @@
+$date
+  2026-08-19
+$end
+$version
+  Synthetic C2 address-write transaction for the decoder fixture.
+$end
+$timescale 1us $end
+$scope module logic $end
+$var wire 1 ! c2ck $end
+$var wire 1 " c2d $end
+$upscope $end
+$enddefinitions $end
+$dumpvars
+1!
+0"
+$end
+#30
+0!
+#60
+1!
+#65
+0!
+#70
+1!
+#75
+0!
+1"
+#80
+1!
+#85
+0!
+#90
+1!
+#95
+0!
+0"
+#100
+1!
+#105
+0!
+1"
+#110
+1!
+#115
+0!
+0"
+#120
+1!
+#125
+0!
+#130
+1!
+#135
+0!
+#140
+1!
+#145
+0!
+1"
+#150
+1!
+#155
+0!
+0"
+#160
+1!
+#165
+0!
+#170
+1!
+#175
+0!
+#180
+1!
