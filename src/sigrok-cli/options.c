@@ -29,7 +29,8 @@ gboolean opt_scan_devs = FALSE;
 gboolean opt_dont_scan = FALSE;
 gboolean opt_wait_trigger = FALSE;
 gchar *opt_input_file = NULL;
-gchar *opt_output_file = NULL;
+gchar *opt_output_dir = NULL;
+gchar *opt_output_mode = NULL;
 gchar *opt_drv = NULL;
 gchar **opt_configs = NULL;
 gchar *opt_channels = NULL;
@@ -98,7 +99,6 @@ CHECK_ONCE(opt_frames)
 #undef CHECK_STR_ONCE
 
 static gchar **input_file_array = NULL;
-static gchar **output_file_array = NULL;
 
 static const GOptionEntry optargs[] = {
 	{"version", 'V', 0, G_OPTION_ARG_NONE, &opt_version,
@@ -117,8 +117,10 @@ static const GOptionEntry optargs[] = {
 			"Load input from file", NULL},
 	{"input-format", 'I', 0, G_OPTION_ARG_CALLBACK, &check_opt_input_format,
 			"Input format", NULL},
-	{"output-file", 'o', 0, G_OPTION_ARG_FILENAME_ARRAY, &output_file_array,
-			"Save output to file", NULL},
+	{"output-dir", 0, 0, G_OPTION_ARG_FILENAME, &opt_output_dir,
+			"Artifact directory for data output", "DIR"},
+	{"output-mode", 0, 0, G_OPTION_ARG_STRING, &opt_output_mode,
+			"Data output mode (file or stdout)", "MODE"},
 	{"output-format", 'O', 0, G_OPTION_ARG_CALLBACK, &check_opt_output_format,
 			"Output format", NULL},
 	{"transform-module", 'T', 0, G_OPTION_ARG_CALLBACK, &check_opt_transform_module,
@@ -199,12 +201,17 @@ int parse_options(int argc, char **argv)
 		opt_input_file = g_strdup(input_file_array[0]);
 	}
 
-	if (NULL != output_file_array) {
-		if (NULL != output_file_array[0] && NULL != output_file_array[1]) {
-			g_critical("option \"--output-file/-o\" only allowed once");
-			goto done;
-		}
-		opt_output_file = g_strdup(output_file_array[0]);
+	if (!opt_output_mode)
+		opt_output_mode = g_strdup("file");
+	if (g_ascii_strcasecmp(opt_output_mode, "file") != 0 &&
+		g_ascii_strcasecmp(opt_output_mode, "stdout") != 0) {
+		g_critical("Invalid output mode '%s'; expected file or stdout.",
+			opt_output_mode);
+		goto done;
+	}
+	if (g_ascii_strcasecmp(opt_output_mode, "stdout") == 0 && opt_output_dir) {
+		g_critical("--output-dir cannot be used with --output-mode stdout.");
+		goto done;
 	}
 
 	if (1 != argc) {
@@ -217,9 +224,7 @@ int parse_options(int argc, char **argv)
 done:
 	g_option_context_free(context);
 	g_strfreev(input_file_array);
-	g_strfreev(output_file_array);
 	input_file_array = NULL;
-	output_file_array = NULL;
 
 	return ret;
 }

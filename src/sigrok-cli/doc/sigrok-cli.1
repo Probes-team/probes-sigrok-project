@@ -144,16 +144,24 @@ Example for loading a binary file with options:
 .br
 .BR "               \-I binary:numchannels=4:samplerate=1mhz" " [...]"
 .TP
-.BR "\-o, \-\-output\-file " <filename>
-Save output to a file instead of writing it to stdout. The default format
-used when saving is the sigrok session file format. This can be changed with
-the
-.B \-\-output\-format
-option.
+.B "\-\-output\-dir " <directory>
+Select the operation directory for data-producing operations. The directory
+is created when missing and may already contain other files. Same-named fixed
+artifacts from this operation are replaced; unrelated files are preserved. If
+omitted, sigrok-cli creates a unique operation directory below the platform
+user data directory. Fixed artifacts
+include Bcapture.srP, Bdecode.txtP, Bdecode.binP, and
+Bresult.jsonP as applicable.
 .sp
-Example for saving data in the sigrok session format:
-.sp
-.RB "  $ " "sigrok\-cli " "[...] " "\-o example.sr"
+Data-producing operations default to file output and print one JSON result
+summary line to stdout. Information commands such as scan, show, list,
+version, help, get, and set continue to print their short result directly.
+.TP
+.B "\-\-output\-mode " <file|stdout>
+Choose the data output mode. The default is BfileP. Use explicit
+BstdoutP when a raw capture or decoder stream is required for a pipe;
+BstdoutP cannot be combined with B\-\-output\-dirP. Warnings and
+errors are written to stderr.
 .TP
 .BR "\-O, \-\-output\-format " <format>
 Set the output format to use. Use the
@@ -184,7 +192,7 @@ like this:
 .sp
 Example for saving data in the CSV format with options:
 .sp
-.RB "  $ " "sigrok\-cli " "[...] " "\-o example.csv \-O csv:dedup:header=false"
+.RB "  $ " "sigrok\-cli " "[...] " "\-\-output\-mode stdout \-O csv:dedup:header=false"
 .sp
 Notice that boolean options are \fBtrue\fP when no value gets specified.
 .TP
@@ -407,13 +415,15 @@ The argument is the name of the decoder whose meta output to show.
 Not every decoder generates meta output.
 .TP
 .BR "\-B, \-\-protocol\-decoder\-binary " <binaryspec>
-When given, decoder "raw" data of various kinds is written to stdout instead
-of annotations (this could be raw binary UART/SPI bytes, or WAV files, PCAP
-files, PNG files, or anything else; this is entirely dependent on the
-decoder and what kinds of binary output make sense for that decoder).
+When given, decoder "raw" data of various kinds is written to the selected
+data output. Add B\-\-output\-mode stdoutP for a raw stdout stream;
+otherwise it is saved as Bdecode.binP in the operation directory. This
+could be raw binary UART/SPI bytes, WAV files, PCAP files, PNG files, or
+anything else; the exact content is decoder-dependent.
 .sp
-No other information is printed to stdout, so this is
-suitable for piping into other programs or saving to a file.
+In direct stdout mode no other information is printed to stdout, so this is
+suitable for piping into other programs. File mode prints only the JSON result
+summary.
 .sp
 Protocol decoders that support binary output publish a list of binary
 classes, for example the UART decoder might have "TX" and "RX". To
@@ -424,7 +434,7 @@ select TX for output, the argument to this option would be:
 .br
 .sp
 If only the protocol decoder is specified, without binary class, all classes
-are written to stdout:
+are written to the selected output:
 .sp
  $
 .B "sigrok\-cli \-i <file.sr> \-B uart"

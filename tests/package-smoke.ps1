@@ -6,6 +6,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+$PackagePath = [IO.Path]::GetFullPath($PackagePath)
 $exe = Join-Path $PackagePath 'sigrok-cli.exe'
 if (-not (Test-Path -LiteralPath $exe)) {
     throw "Package CLI is missing: $exe"
@@ -37,6 +38,24 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "demo --scan failed: $($scan -join [Environment]::NewLine)" }
     $show = @(& $exe -d demo --show 2>&1)
     if ($LASTEXITCODE -ne 0) { throw "demo --show failed: $($show -join [Environment]::NewLine)" }
+    $help = @(& $exe --help 2>&1)
+    if ($LASTEXITCODE -ne 0) { throw "--help failed: $($help -join [Environment]::NewLine)" }
+    $helpText = $help -join [Environment]::NewLine
+    if ($helpText -notmatch '--output-mode' -or $helpText -notmatch '--output-dir' -or
+        $helpText -match '--output-file') {
+        throw 'The packaged CLI output contract is missing or still exposes --output-file.'
+    }
+
+    $capture = @(& $exe -d demo --samples 4 2>&1)
+    if ($LASTEXITCODE -ne 0) { throw "Default demo capture failed: $($capture -join [Environment]::NewLine)" }
+    $captureJson = @($capture | Where-Object { ([string]$_).Trim().StartsWith('{') })
+    if ($captureJson.Count -ne 1) { throw 'Default demo capture did not return one JSON summary line.' }
+    $captureResult = $captureJson[0] | ConvertFrom-Json
+    if ($captureResult.status -ne 'ok') { throw 'Default demo capture summary is not successful.' }
+    $direct = @(& $exe -d demo --samples 4 --output-mode stdout 2>&1)
+    if ($LASTEXITCODE -ne 0 -or ($direct -join "`n") -notmatch '(?m)^D[0-9]+:') {
+        throw 'Explicit stdout mode did not return the demo data stream.'
+    }
 
     $supportedText = $supported -join "`n"
     foreach ($driver in $ExpectedDrivers) {

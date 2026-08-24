@@ -603,6 +603,7 @@ static void jsontrace_open_close(gboolean is_close_req,
 {
 	static gboolean is_file_open;
 	static gboolean is_item_open;
+	FILE *out = artifact_decoder_text_stream(artifact_context_current());
 
 	if (is_close_req && is_item_open)
 		close_item = TRUE;
@@ -610,42 +611,42 @@ static void jsontrace_open_close(gboolean is_close_req,
 	/* Automatic file header, and array item separation. */
 	if (open_item) {
 		if (!is_file_open)
-			printf("{\"traceEvents\": [\n");
+			fprintf(out, "{\"traceEvents\": [\n");
 		if (is_item_open) {
-			printf("}");
+			fprintf(out, "}");
 			is_item_open = FALSE;
 		}
 		if (is_file_open) {
-			printf(",\n");
+			fprintf(out, ",\n");
 		}
 		is_file_open = TRUE;
 	}
 
 	/* Array item open/append/close. */
 	if (open_item) {
-		printf("{");
+		fprintf(out, "{");
 		is_item_open = TRUE;
 	}
 	if (!open_item && !close_item && !is_close_req) {
-		printf(", ");
+		fprintf(out, ", ");
 		is_item_open = TRUE;
 	}
 	if (close_item) {
-		printf("}");
+		fprintf(out, "}");
 		is_item_open = FALSE;
 	}
 
 	/* Automatic file footer on shutdown. */
 	if (is_close_req && is_file_open) {
-		printf("\n");
-		printf("]}\n");
+		fprintf(out, "\n");
+		fprintf(out, "]}\n");
 	}
 	if (is_close_req)
 		is_file_open = FALSE;
 
 	/* Flush at end of lines, or end of file. */
 	if (close_item || is_close_req)
-		fflush(stdout);
+		fflush(out);
 }
 
 /* Convert uint64 sample number to double timestamp in microseconds. */
@@ -706,26 +707,26 @@ static void jsontrace_annotation(struct srd_decoder *dec,
 	 * construction of output text?
 	 */
 	jsontrace_open_close(FALSE, TRUE, FALSE);
-	printf("\"%s\": \"%s\"", "ph", "B");
+	fprintf(artifact_decoder_text_stream(artifact_context_current()), "\"%s\": \"%s\"", "ph", "B");
 	jsontrace_open_close(FALSE, FALSE, FALSE);
-	printf("\"%s\": %lf", "ts", jsontrace_ts_usec(pdata->start_sample));
+	fprintf(artifact_decoder_text_stream(artifact_context_current()), "\"%s\": %lf", "ts", jsontrace_ts_usec(pdata->start_sample));
 	jsontrace_open_close(FALSE, FALSE, FALSE);
-	printf("\"%s\": \"%s\"", "pid", pdata->pdo->proto_id);
+	fprintf(artifact_decoder_text_stream(artifact_context_current()), "\"%s\": \"%s\"", "pid", pdata->pdo->proto_id);
 	jsontrace_open_close(FALSE, FALSE, FALSE);
-	printf("\"%s\": \"%s\"", "tid", row_text);
+	fprintf(artifact_decoder_text_stream(artifact_context_current()), "\"%s\": \"%s\"", "tid", row_text);
 	jsontrace_open_close(FALSE, FALSE, FALSE);
-	printf("\"%s\": \"%s\"", "name", pda->ann_text[0]);
+	fprintf(artifact_decoder_text_stream(artifact_context_current()), "\"%s\": \"%s\"", "name", pda->ann_text[0]);
 
 	jsontrace_open_close(FALSE, TRUE, FALSE);
-	printf("\"%s\": \"%s\"", "ph", "E");
+	fprintf(artifact_decoder_text_stream(artifact_context_current()), "\"%s\": \"%s\"", "ph", "E");
 	jsontrace_open_close(FALSE, FALSE, FALSE);
-	printf("\"%s\": %lf", "ts", jsontrace_ts_usec(pdata->end_sample));
+	fprintf(artifact_decoder_text_stream(artifact_context_current()), "\"%s\": %lf", "ts", jsontrace_ts_usec(pdata->end_sample));
 	jsontrace_open_close(FALSE, FALSE, FALSE);
-	printf("\"%s\": \"%s\"", "pid", pdata->pdo->proto_id);
+	fprintf(artifact_decoder_text_stream(artifact_context_current()), "\"%s\": \"%s\"", "pid", pdata->pdo->proto_id);
 	jsontrace_open_close(FALSE, FALSE, FALSE);
-	printf("\"%s\": \"%s\"", "tid", row_text);
+	fprintf(artifact_decoder_text_stream(artifact_context_current()), "\"%s\": \"%s\"", "tid", row_text);
 	jsontrace_open_close(FALSE, FALSE, FALSE);
-	printf("\"%s\": \"%s\"", "name", pda->ann_text[0]);
+	fprintf(artifact_decoder_text_stream(artifact_context_current()), "\"%s\": \"%s\"", "name", pda->ann_text[0]);
 
 	jsontrace_open_close(FALSE, FALSE, TRUE);
 }
@@ -801,22 +802,23 @@ void show_pd_annotations(struct srd_proto_data *pdata, void *cb_data)
 	 * determined above.
 	 */
 	if (show_snum) {
-		printf("%" PRIu64 "-%" PRIu64 " ",
+		fprintf(artifact_decoder_text_stream(artifact_context_current()), "%" PRIu64 "-%" PRIu64 " ",
 			pdata->start_sample, pdata->end_sample);
 	}
-	printf("%s: ", pdata->pdo->proto_id);
+	fprintf(artifact_decoder_text_stream(artifact_context_current()), "%s: ", pdata->pdo->proto_id);
 	if (show_class) {
 		ann_descr = g_slist_nth_data(dec->annotations, pda->ann_class);
-		printf("%s: ", ann_descr[0]);
+		fprintf(artifact_decoder_text_stream(artifact_context_current()), "%s: ", ann_descr[0]);
 	}
 	quote = show_quotes ? "\"" : "";
-	printf("%s%s%s", quote, pda->ann_text[0], quote);
+	fprintf(artifact_decoder_text_stream(artifact_context_current()), "%s%s%s", quote, pda->ann_text[0], quote);
 	if (show_abbrev) {
 		for (i = 1; pda->ann_text[i]; i++)
-			printf(" %s%s%s", quote, pda->ann_text[i], quote);
+			fprintf(artifact_decoder_text_stream(artifact_context_current()), " %s%s%s", quote, pda->ann_text[i], quote);
 	}
-	printf("\n");
-	fflush(stdout);
+	fprintf(artifact_decoder_text_stream(artifact_context_current()), "\n");
+	fflush(artifact_decoder_text_stream(artifact_context_current()));
+	artifact_note_decoder_text(artifact_context_current(), 0);
 }
 
 void show_pd_meta(struct srd_proto_data *pdata, void *cb_data)
@@ -829,11 +831,16 @@ void show_pd_meta(struct srd_proto_data *pdata, void *cb_data)
 		return;
 
 	if (opt_pd_samplenum || opt_loglevel > SR_LOG_WARN)
-		printf("%"PRIu64"-%"PRIu64" ", pdata->start_sample, pdata->end_sample);
-	printf("%s: ", pdata->pdo->proto_id);
-	printf("%s: %s", pdata->pdo->meta_name, g_variant_print(pdata->data, FALSE));
-	printf("\n");
-	fflush(stdout);
+		fprintf(artifact_decoder_text_stream(artifact_context_current()), "%"PRIu64"-%"PRIu64" ", pdata->start_sample, pdata->end_sample);
+	fprintf(artifact_decoder_text_stream(artifact_context_current()), "%s: ", pdata->pdo->proto_id);
+	{
+		char *value = g_variant_print(pdata->data, FALSE);
+		fprintf(artifact_decoder_text_stream(artifact_context_current()), "%s: %s", pdata->pdo->meta_name, value);
+		g_free(value);
+	}
+	fprintf(artifact_decoder_text_stream(artifact_context_current()), "\n");
+	fflush(artifact_decoder_text_stream(artifact_context_current()));
+	artifact_note_decoder_text(artifact_context_current(), 0);
 }
 
 void show_pd_binary(struct srd_proto_data *pdata, void *cb_data)
@@ -855,9 +862,11 @@ void show_pd_binary(struct srd_proto_data *pdata, void *cb_data)
 		/* Not showing this binary class. */
 		return;
 
-	/* Just send the binary output to stdout, no embellishments. */
-	fwrite(pdb->data, pdb->size, 1, stdout);
-	fflush(stdout);
+	/* Just send the binary output to the selected stream, no embellishments. */
+	fwrite(pdb->data, pdb->size, 1,
+		artifact_decoder_binary_stream(artifact_context_current()));
+	fflush(artifact_decoder_binary_stream(artifact_context_current()));
+	artifact_note_decoder_binary(artifact_context_current(), pdb->size);
 }
 
 void show_pd_prepare(void)

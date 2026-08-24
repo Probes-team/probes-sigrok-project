@@ -149,6 +149,32 @@ static int searchpath_add_package_dir(void)
 #endif
 }
 
+/* Stable user-owned decoder root, kept outside versioned package installs. */
+static int searchpath_add_user_decoder_dir(void)
+{
+#ifdef G_OS_WIN32
+	const char *local_appdata;
+	char *decoder_dir;
+	int ret;
+
+	local_appdata = g_getenv("LOCALAPPDATA");
+	if (!local_appdata || !*local_appdata)
+		return SRD_OK;
+
+	decoder_dir = g_build_filename(local_appdata, "Probes", "sigrok",
+			"decoders", NULL);
+	if (g_file_test(decoder_dir, G_FILE_TEST_IS_DIR))
+		ret = srd_decoder_searchpath_add(decoder_dir);
+	else
+		ret = SRD_OK;
+	g_free(decoder_dir);
+
+	return ret;
+#else
+	return SRD_OK;
+#endif
+}
+
 static void print_versions(void)
 {
 	GString *s;
@@ -293,6 +319,11 @@ SRD_API int srd_init(const char *path)
 #endif
 	/* A portable Windows package keeps decoders next to its executable. */
 	if ((ret = searchpath_add_package_dir()) != SRD_OK) {
+		Py_Finalize();
+		return ret;
+	}
+	/* Stable user-owned decoders, outside versioned package contents. */
+	if ((ret = searchpath_add_user_decoder_dir()) != SRD_OK) {
 		Py_Finalize();
 		return ret;
 	}

@@ -28,6 +28,13 @@ struct sr_context *sr_ctx = NULL;
 struct srd_session *srd_sess = NULL;
 #endif
 
+static gboolean data_operation_requested(void)
+{
+	if (opt_input_file && !opt_show)
+		return TRUE;
+	return opt_samples || opt_time || opt_frames || opt_continuous;
+}
+
 static void logger(const gchar *log_domain, GLogLevelFlags log_level,
 		   const gchar *message, gpointer cb_data)
 {
@@ -238,6 +245,9 @@ static void set_options(void)
 
 int main(int argc, char **argv)
 {
+	struct artifact_context *artifact = NULL;
+	int artifact_result = 0;
+
 	g_log_set_default_handler(logger, NULL);
 
 	if (parse_options(argc, argv)) {
@@ -278,7 +288,8 @@ int main(int argc, char **argv)
 		if (opt_pd_binary) {
 			if (setup_pd_binary(opt_pd_binary) != 0)
 				goto done;
-			if (setup_binary_stdout() != 0)
+			if (g_ascii_strcasecmp(opt_output_mode, "stdout") == 0 &&
+				setup_binary_stdout() != 0)
 				goto done;
 			if (srd_pd_output_callback_add(srd_sess, SRD_OUTPUT_BINARY,
 					show_pd_binary, NULL) != SRD_OK)
@@ -297,8 +308,23 @@ int main(int argc, char **argv)
 					show_pd_annotations, NULL) != SRD_OK)
 				goto done;
 		}
-		show_pd_prepare();
 	}
+#endif
+
+	if (data_operation_requested()) {
+		const char *operation = opt_pds ?
+			(opt_input_file ? "decode" : "capture-decode") :
+			(opt_input_file ? "convert" : "capture");
+		enum artifact_output_mode mode =
+			g_ascii_strcasecmp(opt_output_mode, "stdout") == 0 ?
+			ARTIFACT_OUTPUT_STDOUT : ARTIFACT_OUTPUT_FILE;
+		if (artifact_context_begin(mode, opt_output_dir, operation,
+				&artifact) != 0)
+			goto done;
+	}
+#ifdef HAVE_SRD
+	if (opt_pds && data_operation_requested())
+		show_pd_prepare();
 #endif
 
 	if (opt_version)
@@ -342,8 +368,15 @@ int main(int argc, char **argv)
 	if (opt_pds)
 		srd_exit();
 #endif
+	if (artifact)
+		artifact_result = artifact_context_finish(artifact, TRUE);
+	artifact = NULL;
+	if (artifact_result != 0)
+		goto done;
 
 done:
+	if (artifact)
+		artifact_context_abort(artifact);
 	if (sr_ctx)
 		sr_exit(sr_ctx);
 

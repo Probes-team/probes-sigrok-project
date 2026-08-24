@@ -154,9 +154,13 @@ Windows 工具链，但调用者只需使用以下命令：
 ```powershell
 ./scripts/requirements.ps1
 ./scripts/build.ps1 -Configuration Release
-./scripts/package.ps1 -Version 0.1.0
-./scripts/verify-package.ps1 -PackagePath ./dist/probes-sigrok-0.1.0
+./scripts/package.ps1
+./scripts/verify-package.ps1 -PackagePath ./dist/probes-sigrok-current
 ```
+
+日常打包默认使用版本名 `current`，以便构建产物和缓存路径稳定。只有需要发布、
+归档或并行保留多个明确版本时，才显式传入其它 `-Version` 值；未传入时
+`scripts/package.ps1` 自动使用 `current`。
 
 `config/release.psd1` 保存少量策略值，避免把它们散落或硬编码到脚本中：
 
@@ -221,8 +225,39 @@ source-disclosure/
 启用功能所需的 DLL。不得把编译器 SDK、导入库（`.a`/`.lib`）、静态库、头文件、
 目标文件、构建缓存或整个任意 MSYS2 目录复制进发行包。
 
+用户自建的协议 decoder 不放入这个版本化发行目录。Windows 运行时会额外搜索
+`%LOCALAPPDATA%\Probes\sigrok\decoders\`；该目录由用户长期维护，包升级不会覆盖。
+每个 decoder 应作为该根目录下的 Python 包（例如
+`<decoder-id>\__init__.py` 和 `pd.py`）。既有的 `SIGROKDECODE_DIR`、
+`SIGROKDECODE_PATH` 仍可用于临时或开发时增加其它搜索路径。
+
 最小化应首先发生在配置阶段：构建时禁用未使用的 driver、input、output 和可选
 传输层。先进行宽泛构建、再删除 DLL，不是有效的最小化方法。
+
+## 面向 AI 调用者的输出契约
+
+采集、输入转换和协议 decode 等数据型操作默认使用文件模式。CLI 会在
+`%LOCALAPPDATA%\\Probes\\sigrok\\artifacts\\<operation-id>`（其它平台为 GLib
+用户数据目录下的对应路径）创建 operation 目录，并在 stdout 输出一行 JSON
+摘要。摘要中的 `artifacts` 路径指向按需生成的 `capture.sr`、`decode.txt`、
+`decode.bin`，目录内同时保存 `result.json`。
+
+可以用 `--output-dir <dir>` 指定本次 operation 目录；目录不存在时自动创建，已
+有目录可以包含其它内容，本次生成的同名产物会覆盖，其他文件保持不变。需要把
+原始采集或 decoder 数据直接交给管道时，必须显式使用
+`--output-mode stdout`，且不能同时指定 `--output-dir`。版本、帮助、scan/show、
+支持列表以及 get/set 等短状态命令仍直接输出 stdout，不创建 artifact。
+
+例如：
+
+```powershell
+& .\\sigrok-cli.exe -d demo --samples 4
+& .\\sigrok-cli.exe -i .\\capture.sr -P 'uart:rx=D0' --output-dir .\\decode-op
+& .\\sigrok-cli.exe -d demo --samples 4 --output-mode stdout
+```
+
+`--output-format` 仅选择数据格式，不承担路径职责；项目不再提供旧式单文件
+输出选项。
 
 ## 8. 验证门禁
 

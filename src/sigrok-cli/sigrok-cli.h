@@ -25,9 +25,10 @@
 #include <libsigrokdecode/libsigrokdecode.h>
 #endif
 #include <libsigrok/libsigrok.h>
+#include "artifacts.h"
 
 #define DEFAULT_OUTPUT_FORMAT_FILE "srzip"
-#define DEFAULT_OUTPUT_FORMAT_NOFILE "bits:width=64"
+#define DEFAULT_OUTPUT_FORMAT_STDOUT "bits:width=64"
 
 /* main.c */
 extern struct sr_context *sr_ctx;
@@ -139,7 +140,8 @@ extern gboolean opt_scan_devs;
 extern gboolean opt_dont_scan;
 extern gboolean opt_wait_trigger;
 extern gchar *opt_input_file;
-extern gchar *opt_output_file;
+extern gchar *opt_output_dir;
+extern gchar *opt_output_mode;
 extern gchar *opt_drv;
 extern gchar **opt_configs;
 extern gchar *opt_channels;

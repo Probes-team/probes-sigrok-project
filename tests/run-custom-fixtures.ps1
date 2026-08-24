@@ -19,6 +19,8 @@ $oldPath = $env:PATH
 $oldPythonHome = $env:PYTHONHOME
 $oldDecoderDir = $env:SIGROKDECODE_DIR
 $oldDecoderPath = $env:SIGROKDECODE_PATH
+$temporaryRoot = Join-Path ([IO.Path]::GetTempPath()) ("probes-sigrok-fixtures-" + [guid]::NewGuid())
+New-Item -ItemType Directory -Force -Path $temporaryRoot | Out-Null
 try {
     $env:PATH = "$PackagePath;$env:SystemRoot\System32;$env:SystemRoot"
     Remove-Item Env:PYTHONHOME, Env:SIGROKDECODE_DIR, Env:SIGROKDECODE_PATH -ErrorAction SilentlyContinue
@@ -53,15 +55,42 @@ try {
         if (-not (Test-Path -LiteralPath $fixture)) {
             throw "Decoder fixture '$($decoder.fixture)' for '$($decoder.id)' is missing."
         }
+        $operationDir = Join-Path $temporaryRoot $decoder.id
         $arguments = @($decoder.arguments | ForEach-Object { ([string]$_).Replace('{fixture}', $fixture) })
+        $arguments += @('--output-mode', 'file', '--output-dir', $operationDir)
         $output = @(& $exe @arguments 2>&1)
         if ($LASTEXITCODE -ne 0) {
             throw "Decoder fixture '$($decoder.id)' failed: $($output -join [Environment]::NewLine)"
         }
-        $text = $output -join "`n"
+        $resultLine = @($output | Where-Object { ([string]$_).Trim().StartsWith('{') })
+        if ($resultLine.Count -ne 1) {
+            throw "Decoder fixture '$($decoder.id)' did not return one JSON result line."
+        }
+        $result = $resultLine[0] | ConvertFrom-Json
+        $textArtifact = @($result.artifacts | Where-Object { $_.kind -eq 'decode' })
+        if ($textArtifact.Count -ne 1 -or -not (Test-Path -LiteralPath $textArtifact[0].path)) {
+            throw "Decoder fixture '$($decoder.id)' produced no decode.txt artifact; summary: $($resultLine[0])"
+        }
+        $text = Get-Content -LiteralPath $textArtifact[0].path -Raw
         foreach ($pattern in @($decoder.expect)) {
             if ($text -notmatch $pattern) {
                 throw "Decoder fixture '$($decoder.id)' did not match '$pattern'."
+            }
+        }
+    }
+    $firstDecoder = @($registry.decoders | Where-Object { $null -ne $_ }) | Select-Object -First 1
+    if ($firstDecoder) {
+        $fixture = Join-Path $fixtureRoot $firstDecoder.fixture
+        $arguments = @($firstDecoder.arguments | ForEach-Object { ([string]$_).Replace('{fixture}', $fixture) })
+        $arguments += @('--output-mode', 'stdout')
+        $output = @(& $exe @arguments 2>&1)
+        if ($LASTEXITCODE -ne 0) {
+            throw "Direct decoder fixture '$($firstDecoder.id)' failed: $($output -join [Environment]::NewLine)"
+        }
+        $text = $output -join [Environment]::NewLine
+        foreach ($pattern in @($firstDecoder.expect)) {
+            if ($text -notmatch $pattern) {
+                throw "Direct decoder fixture '$($firstDecoder.id)' did not match '$pattern'."
             }
         }
     }
@@ -75,4 +104,5 @@ try {
         if ($null -eq $entry.Value) { Remove-Item "Env:$($entry.Name)" -ErrorAction SilentlyContinue }
         else { Set-Item "Env:$($entry.Name)" $entry.Value }
     }
+    Remove-Item -LiteralPath $temporaryRoot -Recurse -Force -ErrorAction SilentlyContinue
 }

@@ -85,10 +85,10 @@ const struct sr_output *setup_output_format(const struct sr_dev_inst *sdi, FILE 
 	char *fmtspec;
 
 	if (!opt_output_format) {
-		if (opt_output_file) {
+		if (artifact_is_file_mode()) {
 			opt_output_format = DEFAULT_OUTPUT_FORMAT_FILE;
 		} else {
-			opt_output_format = DEFAULT_OUTPUT_FORMAT_NOFILE;
+			opt_output_format = DEFAULT_OUTPUT_FORMAT_STDOUT;
 		}
 	}
 
@@ -106,14 +106,15 @@ const struct sr_output *setup_output_format(const struct sr_dev_inst *sdi, FILE 
 	} else {
 		fmtopts = NULL;
 	}
-	o = sr_output_new(omod, fmtopts, sdi, opt_output_file);
+	o = sr_output_new(omod, fmtopts, sdi,
+		artifact_is_file_mode() ? artifact_capture_path(artifact_context_current()) : NULL);
 
-	if (opt_output_file) {
+	if (artifact_is_file_mode()) {
 		if (!sr_output_test_flag(omod, SR_OUTPUT_INTERNAL_IO_HANDLING)) {
-			*outfile = g_fopen(opt_output_file, "wb");
+			*outfile = g_fopen(artifact_capture_path(artifact_context_current()), "wb");
 			if (!*outfile) {
-				g_critical("Cannot write to output file '%s'.",
-					opt_output_file);
+				g_critical("Cannot write to capture artifact '%s'.",
+					artifact_capture_path(artifact_context_current()));
 			}
 		} else {
 			*outfile = NULL;
@@ -310,8 +311,13 @@ void datafeed_in(const struct sr_dev_inst *sdi,
 			props_get_channels(df_arg, sdi);
 			break;
 		}
-		if (!(o = setup_output_format(sdi, &outfile)))
-			g_critical("Failed to initialize output module.");
+		if (!opt_pds || (artifact_is_file_mode() && !opt_input_file)) {
+			if (!(o = setup_output_format(sdi, &outfile)))
+				g_critical("Failed to initialize output module.");
+		} else {
+			o = NULL;
+			outfile = NULL;
+		}
 
 		/* Set up backup analog output module. */
 		if (outfile)
@@ -460,7 +466,7 @@ void datafeed_in(const struct sr_dev_inst *sdi,
 		break;
 	}
 
-	if (!do_props && o && !opt_pds) {
+	if (!do_props && o && (!opt_pds || artifact_is_file_mode())) {
 		if (sr_output_send(o, packet, &out) == SR_OK) {
 			if (oa && !out) {
 				/*
@@ -514,6 +520,8 @@ void datafeed_in(const struct sr_dev_inst *sdi,
 				g_warning("Device only sent %" PRIu64 " samples.",
 					   rcvd_samples_analog);
 		}
+		artifact_note_samples(artifact_context_current(), rcvd_samples_logic,
+			rcvd_samples_analog, triggered);
 	}
 
 }

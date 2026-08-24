@@ -237,17 +237,18 @@ probes-sigrok/
    编译期目录和系统目录搜索链中，加入 `<package-root>/firmware` 作为额外默认路径；
    不删除或覆盖任何原有环境变量路径。
 3. `srd.c` 在既有 XDG、调用者参数、`SIGROKDECODE_DIR`、`SIGROKDECODE_PATH` 搜索链中，
-   加入 `<package-root>/decoders` 作为额外默认路径；不删除、覆盖或重排原有用户
-   提供路径的优先级。
+   加入 `<package-root>/decoders` 和 Windows `%LOCALAPPDATA%\\Probes\\sigrok\\decoders`
+   作为额外默认路径；不删除、覆盖或重排原有用户提供路径的优先级。
 4. `main.c` 只在初始化嵌入式 Python 前调用 runtime path 初始化。它不得设置或覆盖
    `SIGROKDECODE_*`、`SIGROK_FIRMWARE_*`。
 5. `tests/runtime-paths.ps1` 在清除相关环境变量后验证包内 decoder 和 firmware
-   默认路径；再设置测试扩展路径，验证原有环境变量路径仍可生效。
+   默认路径，以及 Windows 用户 decoder 根目录；再设置测试扩展路径，验证原有环境
+   变量路径仍可生效。
 
 **验收**
 
-无环境变量时包可找到自身完整 decoders 和 firmware；设置上游支持的环境变量后，
-额外路径仍被保留。
+无环境变量时包可找到自身完整 decoders、firmware 和用户目录中的 decoder；设置上游
+支持的环境变量后，额外路径仍被保留。用户目录不属于版本化包内容。
 
 ### T06：实现完整上游发行包组装
 
@@ -281,8 +282,10 @@ probes-sigrok/
 **验收**
 
 ```powershell
-./scripts/package.ps1 -Version 0.1.0-dev
+./scripts/package.ps1
 ```
+
+日常构建默认使用版本名 `current`；只有发布或归档等明确场景才显式传入其它版本。
 
 包内完整保留上游 decoder 和 firmware；不存在编译器、SDK、`.a`、`.lib`、`.h`、
 `.o`、pkg-config 文件或构建缓存。
@@ -353,4 +356,3 @@ probes-sigrok/
 - 不引入自定义 VID/PID、设备协议、设备固件或真实硬件 fixture。
 - 不为压缩体积选择部分 decoder、部分官方 firmware 或部分已可构建 driver。
 - 不增加第二套工具链、第二种 Python ABI 或外部运行包装器。
-

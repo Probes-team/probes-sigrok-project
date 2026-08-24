@@ -26,6 +26,8 @@ bin_PROGRAMS = sigrok-cli
 
 sigrok_cli_SOURCES = \
 	main.c \
+	artifacts.c \
+	artifacts.h \
 	runtime_paths.c \
 	show.c \
 	device.c \
