@@ -17,3 +17,8 @@ __pycache__/
 # Logs and generated archives
 *.log
 *.zip
+
+# Published current release artifact
+!/release/
+!/release/current/
+!/release/current/probes-sigrok.zip

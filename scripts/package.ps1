@@ -90,6 +90,18 @@ $manifest = [ordered]@{
     files = @($files | Sort-Object path)
 }
 $manifest | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath (Join-Path $packageRoot 'package-manifest.json') -Encoding utf8
-Compress-Archive -LiteralPath $packageRoot -DestinationPath (Join-Path $distRoot 'probes-sigrok.zip') -Force
+$archivePath = Join-Path $distRoot 'probes-sigrok.zip'
+Compress-Archive -LiteralPath $packageRoot -DestinationPath $archivePath -Force
+
+if ($Version -eq 'current') {
+    $releaseRoot = Join-Path $projectRoot 'release/current'
+    $releaseArchivePath = Join-Path $releaseRoot 'probes-sigrok.zip'
+    $releaseHashPath = Join-Path $releaseRoot 'probes-sigrok.zip.sha256'
+    New-Item -ItemType Directory -Force -Path $releaseRoot | Out-Null
+    Copy-Item -LiteralPath $archivePath -Destination $releaseArchivePath -Force
+    $releaseHash = (Get-FileHash -LiteralPath $releaseArchivePath -Algorithm SHA256).Hash.ToLowerInvariant()
+    Set-Content -LiteralPath $releaseHashPath -Value $releaseHash -Encoding ascii
+    Write-Output "Published current artifact at $releaseArchivePath"
+}
 
 Write-Output "Package assembled at $packageRoot"
