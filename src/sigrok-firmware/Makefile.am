@@ -22,6 +22,11 @@ GNUMAKEFLAGS = --no-print-directory
 
 dist_pkgdata_DATA = \
 	asix-sigma-phasor.fw \
+	kingst-la-01a2.fw \
+	kingst-la1016-fpga.bitstream \
+	kingst-la1016a1-fpga.bitstream \
+	kingst-la2016-fpga.bitstream \
+	kingst-la2016a1-fpga.bitstream \
 	fx2lafw-braintechnology-usb-lps.fw \
 	fx2lafw-cwav-usbeeax.fw \
 	fx2lafw-cwav-usbeedx.fw \
@@ -42,6 +47,11 @@ dist_pkgdata_DATA = \
 	hantek-dso-2250.fw \
 	hantek-dso-5200.fw \
 	hantek-dso-5200A.fw \
+	saleae-logic16-fpga-18.bitstream \
+	saleae-logic16-fpga-33.bitstream \
+	saleae-logic16-fx2.fw \
+	saleae-logicpro16-fpga.bitstream \
+	saleae-logicpro16-fx3.fw \
 	asix-sigma/asix-sigma-100.fw \
 	asix-sigma/asix-sigma-200.fw \
 	asix-sigma/asix-sigma-50.fw \
