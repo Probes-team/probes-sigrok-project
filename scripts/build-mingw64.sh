@@ -56,6 +56,16 @@ export PKG_CONFIG_PATH="$stage_root$prefix/lib/pkgconfig"
 build_component libsigrokdecode
 build_component sigrok-cli
 
+helper_root="$work_root/wch-driver-installer"
+helper_header="$helper_root/driver_manifest_data.h"
+helper_exe="$helper_root/wch-driver-installer.exe"
+mkdir -p "$helper_root"
+python3.14 "$project_root/tools/wch-driver-installer/generate_manifest_header.py" \
+    "$project_root/third_party/wch-ch375/driver-manifest.json" "$helper_header"
+x86_64-w64-mingw32-gcc -O2 -municode -Wall -Wextra -Werror \
+    -I"$helper_root" "$project_root/tools/wch-driver-installer/wch-driver-installer.c" \
+    -ladvapi32 -o "$helper_exe"
+
 runtime_supported="$work_root/runtime-supported.txt"
 (PATH="$stage_root$prefix/bin:/mingw64/bin:/usr/bin" "$stage_root$prefix/bin/sigrok-cli.exe" --list-supported || true) >"$runtime_supported" 2>&1
 

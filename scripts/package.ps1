@@ -1,6 +1,8 @@
 [CmdletBinding()]
 param(
     [ValidatePattern('^[A-Za-z0-9][A-Za-z0-9._-]*$')]
+    # Keep the default stable for extension synchronization: release/current.
+    # An explicit value is supported only when a separately named archive is required.
     [string]$Version = 'current'
 )
 
@@ -19,7 +21,10 @@ $firmwareRoot = Join-Path $projectRoot 'src/sigrok-firmware'
 $wchRoot = Join-Path $projectRoot 'third_party/wch-ch375'
 $wchDllSource = Join-Path $wchRoot 'CH375DLL64.DLL'
 $wchProvenance = Join-Path $wchRoot 'PROVENANCE.md'
-foreach ($required in @($stageRoot, $buildManifestPath, $firmwareRoot, $wchDllSource, $wchProvenance)) {
+$wchDriverSource = Join-Path $wchRoot 'driver-source/x64'
+$wchDriverManifest = Join-Path $wchRoot 'driver-manifest.json'
+$wchInstallerHelper = Join-Path $projectRoot '.work/wch-driver-installer/wch-driver-installer.exe'
+foreach ($required in @($stageRoot, $buildManifestPath, $firmwareRoot, $wchDllSource, $wchProvenance, $wchDriverSource, $wchDriverManifest, $wchInstallerHelper)) {
     if (-not (Test-Path -LiteralPath $required)) {
         throw "Required package input is missing: $required"
     }
@@ -32,6 +37,29 @@ $provenanceHash = [regex]::Match(
 ).Groups[1].Value.ToUpperInvariant()
 if ($provenanceHash -ne $wchHash) {
     throw "CH375DLL64.DLL does not match third_party/wch-ch375/PROVENANCE.md: $wchHash"
+}
+$driverManifest = Get-Content -LiteralPath $wchDriverManifest -Raw | ConvertFrom-Json
+if ($driverManifest.id -ne 'wch-ch375-x64' -or $driverManifest.architecture -ne 'amd64' -or
+    $driverManifest.hardwareIds -notcontains 'USB\VID_1A86&PID_5537' -or
+    $driverManifest.acceptableServices -notcontains 'CH375_A64') {
+    throw 'WCH driver manifest does not describe the expected x64 CH375 device.'
+}
+foreach ($driverFile in @($driverManifest.files)) {
+    if ([IO.Path]::IsPathRooted($driverFile.path) -or $driverFile.path -match '(^|[\\/])\.\.([\\/]|$)') {
+        throw "WCH driver manifest contains an unsafe path: $($driverFile.path)"
+    }
+    $source = Join-Path $wchDriverSource ($driverFile.path.Replace('/', '\'))
+    if (-not (Test-Path -LiteralPath $source -PathType Leaf)) {
+        throw "WCH driver payload is missing: $source"
+    }
+    $item = Get-Item -LiteralPath $source
+    $hash = (Get-FileHash -LiteralPath $source -Algorithm SHA256).Hash.ToLowerInvariant()
+    if ($item.Length -ne [int64]$driverFile.size -or $hash -ne $driverFile.sha256.ToLowerInvariant()) {
+        throw "WCH driver payload hash/size mismatch: $($driverFile.path)"
+    }
+    if ($driverFile.peArchitecture -notin @('data', 'x86', 'amd64')) {
+        throw "WCH driver payload has an unsupported PE architecture: $($driverFile.path)"
+    }
 }
 
 $distRoot = Join-Path $projectRoot "dist/probes-sigrok-$Version"
@@ -47,6 +75,17 @@ Get-ChildItem -LiteralPath $stageBin -Filter '*.dll' -File | ForEach-Object {
     Copy-Item -LiteralPath $_.FullName -Destination $packageRoot
 }
 Copy-Item -LiteralPath $wchDllSource -Destination (Join-Path $packageRoot 'CH375DLL64.DLL')
+Copy-Item -LiteralPath $wchInstallerHelper -Destination (Join-Path $packageRoot 'wch-driver-installer.exe')
+$driverPackageRoot = Join-Path $packageRoot 'driver-install/wch-ch375'
+$driverPackageX64 = Join-Path $driverPackageRoot 'x64'
+New-Item -ItemType Directory -Force -Path $driverPackageX64 | Out-Null
+foreach ($driverFile in @($driverManifest.files)) {
+    $source = Join-Path $wchDriverSource ($driverFile.path.Replace('/', '\'))
+    $destination = Join-Path $driverPackageX64 ($driverFile.path.Replace('/', '\'))
+    New-Item -ItemType Directory -Force -Path (Split-Path -Parent $destination) | Out-Null
+    Copy-Item -LiteralPath $source -Destination $destination -Force
+}
+Copy-Item -LiteralPath $wchDriverManifest -Destination (Join-Path $driverPackageRoot 'driver-manifest.json') -Force
 
 $decoderRoot = Join-Path $stageRoot 'share/libsigrokdecode/decoders'
 if (-not (Test-Path -LiteralPath $decoderRoot)) {
@@ -85,6 +124,7 @@ $manifest = [ordered]@{
     target = $toolchain.Target
     projectCommit = $projectCommit
     build = (Get-Content -LiteralPath $buildManifestPath -Raw | ConvertFrom-Json)
+    drivers = @($driverManifest)
     dllClosure = @($dllClosure)
     peDependencies = @(Get-PeDependencyManifest -PackageRoot $packageRoot -ObjdumpPath $objdump)
     files = @($files | Sort-Object path)

@@ -15,6 +15,30 @@ $wchDll = Join-Path $PackagePath 'CH375DLL64.DLL'
 if (-not (Test-Path -LiteralPath $wchDll)) {
     throw "Packaged WCH runtime DLL is missing: $wchDll"
 }
+$driverRoot = Join-Path $PackagePath 'driver-install/wch-ch375'
+$driverHelper = Join-Path $PackagePath 'wch-driver-installer.exe'
+if (-not (Test-Path -LiteralPath $driverHelper -PathType Leaf)) {
+    throw 'Packaged WCH driver installer helper is missing.'
+}
+$driverManifestPath = Join-Path $driverRoot 'driver-manifest.json'
+if (-not (Test-Path -LiteralPath $driverManifestPath)) {
+    throw "Packaged WCH driver manifest is missing: $driverManifestPath"
+}
+$driverManifest = Get-Content -LiteralPath $driverManifestPath -Raw | ConvertFrom-Json
+if ($driverManifest.id -ne 'wch-ch375-x64' -or $driverManifest.architecture -ne 'amd64') {
+    throw 'Packaged WCH driver manifest has unexpected identity or architecture.'
+}
+foreach ($driverFile in @($driverManifest.files)) {
+    $driverPath = Join-Path (Join-Path $driverRoot 'x64') ($driverFile.path.Replace('/', '\'))
+    if (-not (Test-Path -LiteralPath $driverPath -PathType Leaf)) {
+        throw "Packaged WCH driver file is missing: $($driverFile.path)"
+    }
+    $item = Get-Item -LiteralPath $driverPath
+    $hash = (Get-FileHash -LiteralPath $driverPath -Algorithm SHA256).Hash.ToLowerInvariant()
+    if ($item.Length -ne [int64]$driverFile.size -or $hash -ne $driverFile.sha256.ToLowerInvariant()) {
+        throw "Packaged WCH driver file hash/size mismatch: $($driverFile.path)"
+    }
+}
 
 $temporaryRoot = Join-Path ([IO.Path]::GetTempPath()) ("probes-sigrok-smoke-" + [guid]::NewGuid())
 New-Item -ItemType Directory -Force -Path $temporaryRoot | Out-Null

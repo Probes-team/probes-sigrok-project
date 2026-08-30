@@ -178,7 +178,9 @@ probes-sigrok/
    ```powershell
    @{
        PackageName = 'probes-sigrok'
-       Version = '0.1.0-dev'
+       # Rolling package identity. Keep current unless an archive/release name
+       # is explicitly passed to scripts/package.ps1 -Version.
+       Version = 'current'
        Target = 'x86_64-w64-mingw32'
        SmokeDriver = 'demo'
        PythonMode = 'embedded'
@@ -262,8 +264,10 @@ probes-sigrok/
 
 **具体改造**
 
-1. `package.ps1` 只从 `.work/stage/`、`src/sigrok-firmware/` 和当前 Git `HEAD`
-   获取输入，在 `dist/probes-sigrok-<Version>/probes-sigrok/` 创建新目录。
+1. `package.ps1` 默认使用版本 `current`，只从 `.work/stage/`、`src/sigrok-firmware/`
+   和当前 Git `HEAD` 获取输入，在 `dist/probes-sigrok-current/probes-sigrok/` 创建
+   新目录，并更新 `release/current/`。只有调用者显式传入 `-Version <name>` 时才
+   使用其它目录和版本身份。
 2. 整体复制 `.work/stage/` 安装出的 decoder 目录，包含全部 decoder 和 `common/`；
    不存在 `decoder-allowlist.json`、裁剪脚本或手工依赖表。
 3. 整体复制 `src/sigrok-firmware/` 的有效 firmware 内容到顶层 `firmware/`，排除
@@ -285,7 +289,8 @@ probes-sigrok/
 ./scripts/package.ps1
 ```
 
-日常构建默认使用版本名 `current`；只有发布或归档等明确场景才显式传入其它版本。
+日常构建和打包默认直接使用版本名 `current`；除发布或归档等明确场景外，不要
+   传入其它版本名。
 
 包内完整保留上游 decoder 和 firmware；不存在编译器、SDK、`.a`、`.lib`、`.h`、
 `.o`、pkg-config 文件或构建缓存。

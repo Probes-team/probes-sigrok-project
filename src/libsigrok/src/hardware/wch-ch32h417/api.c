@@ -13,6 +13,7 @@
 #include <string.h>
 
 #include "protocol.h"
+#include "wch_driver_windows.h"
 
 static const struct ch32h417_profile supported_devices[] = {
 	{ USB_VENDOR_ID, USB_PRODUCT_ID, "WCH", "CH32H417 Logic Analyzer" },
@@ -77,11 +78,27 @@ static GSList *scan(struct sr_dev_driver *di, GSList *options)
 	GSList *entry;
 	struct sr_config *config;
 	int index;
+	enum wch_driver_state driver_state;
 
 	for (entry = options; entry; entry = entry->next) {
 		config = entry->data;
 		if (config->key == SR_CONF_CONN)
 			requested_connection = g_variant_get_string(config->data, NULL);
+	}
+	if (requested_connection && g_ascii_strncasecmp(requested_connection,
+		"ch375/", strlen("ch375/")))
+		return std_scan_complete(di, devices);
+	driver_state = wch_driver_probe();
+	if (driver_state == WCH_DRIVER_NO_DEVICE)
+		return std_scan_complete(di, devices);
+	if (driver_state == WCH_DRIVER_OTHER || driver_state == WCH_DRIVER_ERROR)
+		return std_scan_complete(di, devices);
+	if (driver_state == WCH_DRIVER_MISSING) {
+		if (wch_driver_install() != SR_OK)
+			return std_scan_complete(di, devices);
+		driver_state = wch_driver_probe();
+		if (driver_state != WCH_DRIVER_READY)
+			return std_scan_complete(di, devices);
 	}
 	if (ch375_init() != SR_OK) {
 		sr_err("Packaged CH375DLL64.DLL is unavailable");

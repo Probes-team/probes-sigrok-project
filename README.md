@@ -143,8 +143,9 @@ src/libsigrok/src/hardware/<driver-name>/
 5. 以单独提交记录升级，例如 `vendor(sigrok): sync upstream 0.x`，不要把上游
    同步与功能修改混在同一个提交中。
 
-每次发布都打项目 tag，例如 `v0.1.0`。这样即使没有保留官方提交树，也能准确
-知道每一个发行版本采用的上游基线和本地改动。
+滚动包始终使用版本身份 `current`，并发布到 `release/current/`。只有需要保留
+不可变归档或正式发布时，才创建明确的项目 tag 和版本名；这类版本必须由调用者
+显式传入 `scripts/package.ps1 -Version <name>`，不会改变 `current` 的默认行为。
 
 ## 6. 构建方式
 
@@ -158,15 +159,15 @@ Windows 工具链，但调用者只需使用以下命令：
 ./scripts/verify-package.ps1 -PackagePath ./dist/probes-sigrok-current
 ```
 
-日常打包默认使用版本名 `current`，以便构建产物和缓存路径稳定。只有需要发布、
-归档或并行保留多个明确版本时，才显式传入其它 `-Version` 值；未传入时
-`scripts/package.ps1` 自动使用 `current`。
+日常打包直接运行 `scripts/package.ps1`，默认使用版本名 `current`，以便构建产物、
+远程同步路径和缓存路径稳定。只有需要发布、归档或并行保留多个明确版本时，才
+显式传入其它 `-Version` 值；未传入时绝不要求调用者填写版本。
 
 `config/release.psd1` 保存少量策略值，避免把它们散落或硬编码到脚本中：
 
 ```powershell
 @{
-    Version = '0.1.0'
+    Version = 'current'
     Target = 'x86_64-w64-mingw32'
     IncludeDecoders = $true
     IncludeFirmware = $true
@@ -185,8 +186,9 @@ driver 所需的设备库依赖。
 
 ## 7. 发行包组装
 
-`package.ps1` 在 `dist/probes-sigrok-<version>/probes-sigrok/` 生成全新目录，
-然后在旁边创建 zip。复制规则必须明确：
+`package.ps1` 默认在 `dist/probes-sigrok-current/probes-sigrok/` 生成全新目录，
+并同步发布 `release/current/probes-sigrok.zip` 及校验文件，然后在旁边创建 zip。
+需要不可变归档时才显式传入 `-Version`；复制规则必须明确：
 
 ```text
 probes-sigrok/

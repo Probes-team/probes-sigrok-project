@@ -1,0 +1,62 @@
+{
+  "schemaVersion": 1,
+  "id": "wch-ch375-x64",
+  "vendor": "WCH",
+  "version": "3.5.2025.08",
+  "architecture": "amd64",
+  "hardwareIds": ["USB\\VID_1A86&PID_5537"],
+  "acceptableServices": ["CH375_A64"],
+  "replacementPolicy": "missing-only",
+  "install": {
+    "method": "vendor-setup",
+    "executable": "SETUP.EXE",
+    "arguments": "/S",
+    "workingDirectory": "."
+  },
+  "files": [
+    {
+      "path": "CH375WDM.INF",
+      "size": 7799,
+      "sha256": "76e5f3e96743b097c0d45d019b87c6dbef795934e2826fdade2b5e7b37b47fa4",
+      "peArchitecture": "data"
+    },
+    {
+      "path": "CH375WDM.CAT",
+      "size": 14232,
+      "sha256": "08a8d8b21f42635243f0a7b4bd73195a4eea22a85508b3c4fce93a181054b4ba",
+      "peArchitecture": "data"
+    },
+    {
+      "path": "CH375W64.sys",
+      "size": 68992,
+      "sha256": "5803220ed9da96b310397aa81db6612280f7c1a58948c02a5fe6aedf49065f5a",
+      "peArchitecture": "amd64"
+    },
+    {
+      "path": "CH375DLL64.dll",
+      "size": 45448,
+      "sha256": "5ed04e4a8eb9006e92907fdc105c4d8f915408409a02c157ca492a65d9163aa7",
+      "peArchitecture": "amd64"
+    },
+    {
+      "path": "CH375DLL.dll",
+      "size": 35712,
+      "sha256": "0f019b958d4d3f6b8ec0d282ef848a57f0f92a0596d7405b6c58f5aa383a326c",
+      "peArchitecture": "x86"
+    },
+    {
+      "path": "SETUP.EXE",
+      "size": 92624,
+      "sha256": "b89fd6c6a1eb20df0fb347e9af5e935be2e6f2e2915b984543c0532e6d0ffaa2",
+      "peArchitecture": "x86"
+    },
+    {
+      "path": "DRVSETUP64/DRVSETUP64.exe",
+      "size": 54224,
+      "sha256": "b5d55fa31753fcd86145c460d644bac78f171f51d708a050326234b4a2876c4c",
+      "peArchitecture": "amd64"
+    }
+  ],
+  "source": "D:/CSIETPP/mono-probes/worktrees/probes/topic-smart-kit/.local/U3LogicAnalyzer/install/driver/CH372DRV/DRIVER",
+  "catalogSignatureRequired": true
+}

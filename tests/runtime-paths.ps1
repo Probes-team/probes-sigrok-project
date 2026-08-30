@@ -7,6 +7,12 @@ $wchDll = Join-Path $PackagePath 'CH375DLL64.DLL'
 if (-not (Test-Path -LiteralPath $wchDll)) {
     throw "Packaged WCH runtime DLL is missing: $wchDll"
 }
+$wchInstaller = Join-Path $PackagePath 'driver-install/wch-ch375/x64/SETUP.EXE'
+$wchInf = Join-Path $PackagePath 'driver-install/wch-ch375/x64/CH375WDM.INF'
+$wchHelper = Join-Path $PackagePath 'wch-driver-installer.exe'
+if (-not (Test-Path -LiteralPath $wchInstaller) -or -not (Test-Path -LiteralPath $wchInf) -or -not (Test-Path -LiteralPath $wchHelper)) {
+    throw 'Packaged WCH installer layout is incomplete.'
+}
 $oldPath = $env:PATH
 $oldPythonHome = $env:PYTHONHOME
 $oldDecoderDir = $env:SIGROKDECODE_DIR

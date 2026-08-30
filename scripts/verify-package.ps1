@@ -18,6 +18,40 @@ foreach ($required in @('sigrok-cli.exe', 'decoders', 'firmware', 'python', 'sou
         throw "Required package entry is missing: $required"
     }
 }
+$driverRoot = Join-Path $PackagePath 'driver-install/wch-ch375'
+$driverHelper = Join-Path $PackagePath 'wch-driver-installer.exe'
+if (-not (Test-Path -LiteralPath $driverHelper -PathType Leaf)) {
+    throw 'Packaged WCH driver installer helper is missing.'
+}
+$driverManifestPath = Join-Path $driverRoot 'driver-manifest.json'
+if (-not (Test-Path -LiteralPath $driverManifestPath)) {
+    throw 'Packaged WCH driver manifest is missing.'
+}
+$driverManifest = Get-Content -LiteralPath $driverManifestPath -Raw | ConvertFrom-Json
+if ($driverManifest.id -ne 'wch-ch375-x64' -or $driverManifest.architecture -ne 'amd64' -or
+    $driverManifest.hardwareIds -notcontains 'USB\VID_1A86&PID_5537' -or
+    $driverManifest.acceptableServices -notcontains 'CH375_A64') {
+    throw 'Packaged WCH driver manifest is invalid.'
+}
+$driverPayloadPaths = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+foreach ($driverFile in @($driverManifest.files)) {
+    $relative = ('driver-install/wch-ch375/x64/' + $driverFile.path).Replace('/', '\')
+    $path = Join-Path $PackagePath $relative
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Packaged WCH driver file is missing: $relative" }
+    $item = Get-Item -LiteralPath $path
+    $hash = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant()
+    if ($item.Length -ne [int64]$driverFile.size -or $hash -ne $driverFile.sha256.ToLowerInvariant()) {
+        throw "Packaged WCH driver file hash/size mismatch: $relative"
+    }
+    [void]$driverPayloadPaths.Add($relative.Replace('\', '/'))
+    $manifestEntry = @($manifest.files | Where-Object { $_.path -eq $relative.Replace('\', '/') })
+    if ($manifestEntry.Count -ne 1) { throw "WCH driver file is not covered by package manifest: $relative" }
+}
+$catalog = Join-Path $PackagePath 'driver-install/wch-ch375/x64/CH375WDM.CAT'
+if (Get-Command Get-AuthenticodeSignature -ErrorAction SilentlyContinue) {
+    $signature = Get-AuthenticodeSignature -LiteralPath $catalog
+    if ($signature.Status -ne 'Valid') { throw "WCH catalog signature is not valid: $($signature.Status)" }
+}
 
 foreach ($file in $manifest.files) {
     $path = Join-Path $PackagePath $file.path
@@ -55,6 +89,18 @@ if ($forbidden) { throw "Runtime package contains development artifacts: $($forb
 
 $objdump = if ($ObjdumpPath) { $ObjdumpPath } else { Join-Path 'C:\msys64\mingw64\bin' 'objdump.exe' }
 if (Test-Path -LiteralPath $objdump) {
+	foreach ($driverFile in @($driverManifest.files | Where-Object { $_.peArchitecture -ne 'data' })) {
+		$driverPeFile = Join-Path $PackagePath ('driver-install/wch-ch375/x64/' + $driverFile.path.Replace('/', '\\'))
+		$format = @(& $objdump -f $driverPeFile 2>&1) -join "`n"
+		$expectedFormat = if ($driverFile.peArchitecture -eq 'amd64') { 'pei-x86-64' } elseif ($driverFile.peArchitecture -eq 'x86') { 'pei-i386' } else { throw "Unsupported WCH PE architecture: $($driverFile.peArchitecture)" }
+		if ($LASTEXITCODE -ne 0 -or $format -notmatch "file format $expectedFormat") {
+			throw "WCH driver payload PE architecture mismatch: $($driverFile.path)"
+		}
+	}
+	$helperFormat = @(& $objdump -f $driverHelper 2>&1) -join "`n"
+	if ($LASTEXITCODE -ne 0 -or $helperFormat -notmatch 'file format pei-x86-64') {
+		throw 'WCH driver installer helper is not an x64 PE file.'
+	}
     foreach ($binary in Get-ChildItem -LiteralPath $PackagePath -Recurse -File | Where-Object { $_.Extension -in @('.exe', '.dll', '.pyd') }) {
         foreach ($dependency in Get-PeImports -FilePath $binary.FullName -ObjdumpPath $objdump) {
             if (-not (Test-WindowsSystemDll -Name $dependency) -and -not (Test-Path -LiteralPath (Join-Path $PackagePath $dependency))) {

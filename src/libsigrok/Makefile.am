@@ -761,6 +761,8 @@ src_libdrivers_la_SOURCES += \
 	src/hardware/wch-ch32h417/protocol.c \
 	src/hardware/wch-ch32h417/ch375_wrapper.h \
 	src/hardware/wch-ch32h417/ch375_wrapper.c \
+	src/hardware/wch-ch32h417/wch_driver_windows.h \
+	src/hardware/wch-ch32h417/wch_driver_windows.c \
 	src/hardware/wch-ch32h417/api.c
 endif
 if HW_YOKOGAWA_DLM

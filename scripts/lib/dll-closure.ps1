@@ -17,7 +17,7 @@ function Test-WindowsSystemDll {
 
     return $Name -match '^(api-ms-win-|ext-ms-win-)' -or $Name -in @(
         'advapi32.dll', 'bcrypt.dll', 'combase.dll', 'comctl32.dll', 'comdlg32.dll',
-        'crypt32.dll', 'gdi32.dll', 'imm32.dll', 'iphlpapi.dll', 'kernel32.dll',
+        'cfgmgr32.dll', 'crypt32.dll', 'gdi32.dll', 'imm32.dll', 'iphlpapi.dll', 'kernel32.dll',
         'kernelbase.dll', 'msvcrt.dll', 'netapi32.dll', 'ntdll.dll', 'ole32.dll',
         'oleaut32.dll', 'propsys.dll', 'rpcrt4.dll', 'secur32.dll', 'setupapi.dll',
         'shell32.dll', 'ucrtbase.dll', 'user32.dll', 'userenv.dll', 'version.dll',

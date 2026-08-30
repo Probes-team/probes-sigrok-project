@@ -37,4 +37,10 @@ function New-SourceDisclosure {
         throw 'Missing source disclosure component: third_party/wch-ch375'
     }
     Copy-DirectoryContents -Source $wchSource -Destination (Join-Path $disclosureRoot 'wch-ch375')
+
+    $wchInstallerSource = Join-Path $ProjectRoot 'tools/wch-driver-installer'
+    if (-not (Test-Path -LiteralPath $wchInstallerSource)) {
+        throw 'Missing source disclosure component: tools/wch-driver-installer'
+    }
+    Copy-DirectoryContents -Source $wchInstallerSource -Destination (Join-Path $disclosureRoot 'wch-driver-installer')
 }
