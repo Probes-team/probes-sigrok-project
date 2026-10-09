@@ -84,6 +84,7 @@ enum dslogic_ctl_destination {
 #define DS_MODE_FILTER			(1 << 8)
 #define DS_MODE_STREAM_MODE		(1 << 12)
 #define DS_MODE_INT_TEST		(1 << 15)
+#define DS_MODE_SLOW_ACQ		(1 << 10)
 
 #define DSLOGIC_ATOMIC_SAMPLES		(sizeof(uint64_t) * 8)
 #define DSLOGIC_ATOMIC_BYTES		sizeof(uint64_t)
@@ -1190,6 +1191,20 @@ SR_PRIV int dslogic_build_fpga_config(const struct sr_dev_inst *sdi,
 		mode |= DS_MODE_RLE_MODE;
 	if (devc->filter_mode)
 		mode |= DS_MODE_FILTER;
+
+	/*
+	 * DSView mirrors the FPGA "slow acquisition" bit when the logic byte
+	 * rate is below 1 KB/ms. Not setting it can make the FPGA fail to pace
+	 * the capture correctly at low rates.
+	 */
+	{
+		const unsigned int slow_channels = enabled_channel_count(sdi);
+		const double bytes_per_ms = ceil(devc->cur_samplerate / 1000.0 *
+			slow_channels / 8.0);
+
+		if (slow_channels && bytes_per_ms < 1024.0)
+			mode |= DS_MODE_SLOW_ACQ;
+	}
 
 	WL16(&cfg->mode, mode);
 	hw_max_samplerate = devc->selected_mode->hw_max_samplerate ?
@@ -2352,8 +2367,14 @@ SR_PRIV int dslogic_acquisition_stop_with_ops(const struct sr_dev_inst *sdi,
 	devc->acquisition_state = DSLOGIC_ACQ_STOP;
 	/* DSView sets abort before FORCE_RDY so its reply cannot become a trigger. */
 	devc->acq_aborted = TRUE;
-	ret = ops->recover(ops_data, sdi);
+	/*
+	 * Drain in-flight bulk transfers before issuing stop/recovery control
+	 * transfers. Sending them while the data pipe is still active makes
+	 * libusb return LIBUSB_ERROR_BUSY and leaves the FPGA running (DSView
+	 * writes FORCE_RDY on a quiet pipe).
+	 */
 	ops->cancel_and_drain(ops_data, sdi);
+	ret = ops->recover(ops_data, sdi);
 	return ret;
 }
 

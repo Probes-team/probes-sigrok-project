@@ -97,6 +97,9 @@ SR_PRIV gboolean dslogic_profile_operation_supported(
 SR_PRIV gboolean dslogic_profile_operation_is_stream(
 		const struct dslogic_profile *profile,
 		enum dslogic_operation_mode operation_mode);
+/* TRUE only for modes that run without a driver-imposed sample/time cap. */
+SR_PRIV gboolean dslogic_operation_mode_is_continuous(
+		enum dslogic_operation_mode operation_mode);
 SR_PRIV const struct dslogic_channel_mode *dslogic_profile_mode_for_operation(
 		const struct dslogic_profile *profile,
 		enum dslogic_operation_mode operation_mode);

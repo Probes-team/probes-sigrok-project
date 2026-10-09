@@ -32,6 +32,7 @@ static const uint32_t drvopts[] = {
 
 static const uint32_t devopts[] = {
 	SR_CONF_DEVICE_MODE | SR_CONF_GET | SR_CONF_SET | SR_CONF_LIST,
+	SR_CONF_CONTINUOUS | SR_CONF_GET | SR_CONF_SET,
 	SR_CONF_RLE | SR_CONF_GET | SR_CONF_SET,
 	SR_CONF_FILTER | SR_CONF_GET | SR_CONF_SET,
 	SR_CONF_LIMIT_SAMPLES | SR_CONF_GET | SR_CONF_SET,
@@ -471,6 +472,10 @@ static int config_get(uint32_t key, GVariant **data,
 			return SR_ERR_NA;
 		*data = g_variant_new_string(operation_mode_names[devc->operation_mode]);
 		break;
+	case SR_CONF_CONTINUOUS:
+		*data = g_variant_new_boolean(
+			dslogic_operation_mode_is_continuous(devc->operation_mode));
+		break;
 	case SR_CONF_RLE:
 		if (!(devc->profile->capabilities & DSLOGIC_CAP_RLE))
 			return SR_ERR_NA;
@@ -555,6 +560,15 @@ static int config_set(uint32_t key, GVariant *data,
 			return ret;
 		return dslogic_apply_operation_mode((struct sr_dev_inst *)sdi,
 			operation_mode);
+	case SR_CONF_CONTINUOUS:
+		if (g_variant_get_boolean(data))
+			return dslogic_apply_operation_mode((struct sr_dev_inst *)sdi,
+				DSLOGIC_OPERATION_STREAM);
+		if (!dslogic_profile_operation_supported(devc->profile,
+				DSLOGIC_OPERATION_BUFFER))
+			return SR_ERR_ARG;
+		return dslogic_apply_operation_mode((struct sr_dev_inst *)sdi,
+			DSLOGIC_OPERATION_BUFFER);
 	case SR_CONF_RLE:
 		if (!(devc->profile->capabilities & DSLOGIC_CAP_RLE))
 			return SR_ERR_NA;

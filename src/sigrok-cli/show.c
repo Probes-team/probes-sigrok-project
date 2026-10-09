@@ -22,6 +22,8 @@
 #include <string.h>
 #include "sigrok-cli.h"
 
+#define JSON_MAX_SAMPLERATES 256
+
 #define DECODERS_HAVE_TAGS \
 	((SRD_PACKAGE_VERSION_MAJOR > 0) || \
 	 (SRD_PACKAGE_VERSION_MAJOR == 0) && (SRD_PACKAGE_VERSION_MINOR > 5))
@@ -1145,4 +1147,506 @@ void show_serial_ports(void)
 	printf("Available serial/HID/BT/BLE ports:\n");
 	g_slist_foreach(serial_ports, print_serial_port, NULL);
 	g_slist_free_full(serial_ports, (GDestroyNotify)sr_serial_free);
+}
+
+static void show_json_escape(GString *json, const char *text)
+{
+	const unsigned char *p = (const unsigned char *)(text ? text : "");
+
+	for (; *p; p++) {
+		switch (*p) {
+		case '"': g_string_append(json, "\\\""); break;
+		case '\\': g_string_append(json, "\\\\"); break;
+		case '\n': g_string_append(json, "\\n"); break;
+		case '\r': g_string_append(json, "\\r"); break;
+		case '\t': g_string_append(json, "\\t"); break;
+		default:
+			if (*p < 0x20)
+				g_string_append_printf(json, "\\u%04x", *p);
+			else
+				g_string_append_c(json, (gchar)*p);
+		}
+	}
+}
+
+void show_capabilities_json(void)
+{
+	printf("{\"cliVersion\":\"%s\",\"libsigrokVersion\":\"%s\","
+		"\"streamProtocol\":1,\"jsonSchema\":1}\n",
+		SC_PACKAGE_VERSION_STRING, sr_package_version_string_get());
+}
+
+void show_dev_list_json(void)
+{
+	struct sr_dev_inst *sdi;
+	struct sr_dev_driver *driver;
+	GSList *devices, *l;
+	GVariant *gvar;
+	const char *vendor, *model;
+	GString *json;
+	gboolean first = TRUE;
+
+	json = g_string_new("{\"devices\":[");
+	if ((devices = device_scan())) {
+		for (l = devices; l; l = l->next) {
+			sdi = l->data;
+			driver = sr_dev_inst_driver_get(sdi);
+			vendor = sr_dev_inst_vendor_get(sdi);
+			model = sr_dev_inst_model_get(sdi);
+			if (!first)
+				g_string_append_c(json, ',');
+			first = FALSE;
+			g_string_append(json, "{\"driver\":\"");
+			show_json_escape(json, driver->name);
+			g_string_append(json, "\",\"key\":\"");
+			show_json_escape(json, driver->name);
+			if (maybe_config_get(driver, sdi, NULL, SR_CONF_CONN, &gvar) == SR_OK) {
+				g_string_append(json, ":conn=");
+				show_json_escape(json, g_variant_get_string(gvar, NULL));
+				g_variant_unref(gvar);
+			}
+			g_string_append_c(json, '"');
+			if (vendor && vendor[0]) {
+				g_string_append(json, ",\"vendor\":\"");
+				show_json_escape(json, vendor);
+				g_string_append_c(json, '"');
+			}
+			if (model && model[0]) {
+				g_string_append(json, ",\"model\":\"");
+				show_json_escape(json, model);
+				g_string_append_c(json, '"');
+			}
+			g_string_append_c(json, '}');
+		}
+		g_slist_free(devices);
+	}
+	g_string_append(json, "]}\n");
+	printf("%s", json->str);
+	g_string_free(json, TRUE);
+}
+
+static const char *json_datatype_name(int datatype)
+{
+	switch (datatype) {
+	case SR_T_UINT64: return "uint64";
+	case SR_T_STRING: return "string";
+	case SR_T_BOOL: return "bool";
+	case SR_T_FLOAT: return "float";
+	case SR_T_INT32: return "int32";
+	case SR_T_UINT32: return "uint32";
+	case SR_T_UINT64_RANGE: return "uint64-range";
+	case SR_T_DOUBLE_RANGE: return "double-range";
+	case SR_T_RATIONAL_PERIOD: return "rational-period";
+	case SR_T_RATIONAL_VOLT: return "rational-volt";
+	case SR_T_KEYVALUE: return "keyvalue";
+	default: return "other";
+	}
+}
+
+static char trigger_char(int32_t code)
+{
+	switch (code) {
+	case SR_TRIGGER_ZERO: return '0';
+	case SR_TRIGGER_ONE: return '1';
+	case SR_TRIGGER_RISING: return 'r';
+	case SR_TRIGGER_FALLING: return 'f';
+	case SR_TRIGGER_EDGE: return 'e';
+	case SR_TRIGGER_OVER: return 'o';
+	case SR_TRIGGER_UNDER: return 'u';
+	default: return 0;
+	}
+}
+
+static void show_config_values_json(GString *json, struct sr_dev_driver *driver,
+		struct sr_dev_inst *sdi, struct sr_channel_group *cg,
+		uint32_t key, const struct sr_key_info *srci)
+{
+	GVariant *gvar_list, *gvar_dict, *gvar;
+	gsize num_elements, i;
+	const uint64_t *u64;
+	const int32_t *i32;
+	const char **strs;
+
+	if (maybe_config_list(driver, sdi, cg, key, &gvar_list) != SR_OK) {
+		g_string_append(json, "[]");
+		return;
+	}
+
+	g_string_append_c(json, '[');
+
+	if (srci->datatype == SR_T_UINT64 && key == SR_CONF_SAMPLERATE) {
+		gboolean first = TRUE;
+		if ((gvar_dict = g_variant_lookup_value(gvar_list,
+				"samplerates", G_VARIANT_TYPE("at")))) {
+			u64 = g_variant_get_fixed_array(gvar_dict, &num_elements,
+					sizeof(uint64_t));
+			for (i = 0; i < num_elements; i++) {
+				if (!first)
+					g_string_append_c(json, ',');
+				first = FALSE;
+				g_string_append_printf(json, "%"PRIu64, u64[i]);
+			}
+			g_variant_unref(gvar_dict);
+		} else if ((gvar_dict = g_variant_lookup_value(gvar_list,
+				"samplerate-steps", G_VARIANT_TYPE("at")))) {
+			uint64_t rate, count;
+			u64 = g_variant_get_fixed_array(gvar_dict, &num_elements,
+					sizeof(uint64_t));
+			count = (num_elements >= 3 && u64[2] > 0) ?
+				(u64[1] - u64[0]) / u64[2] + 1 : 0;
+			if (count > 0 && count <= JSON_MAX_SAMPLERATES) {
+				for (rate = u64[0]; ; rate += u64[2]) {
+					if (!first)
+						g_string_append_c(json, ',');
+					first = FALSE;
+					g_string_append_printf(json, "%"PRIu64, rate);
+					if (rate >= u64[1])
+						break;
+				}
+			}
+			g_variant_unref(gvar_dict);
+		}
+	} else if (srci->datatype == SR_T_STRING) {
+		strs = g_variant_get_strv(gvar_list, &num_elements);
+		for (i = 0; i < num_elements; i++) {
+			if (i)
+				g_string_append_c(json, ',');
+			g_string_append_c(json, '"');
+			show_json_escape(json, strs[i]);
+			g_string_append_c(json, '"');
+		}
+		g_free(strs);
+	} else if (srci->datatype == SR_T_UINT64) {
+		u64 = g_variant_get_fixed_array(gvar_list, &num_elements,
+				sizeof(uint64_t));
+		for (i = 0; i < num_elements; i++) {
+			if (i)
+				g_string_append_c(json, ',');
+			g_string_append_printf(json, "%"PRIu64, u64[i]);
+		}
+	} else if (srci->datatype == SR_T_FLOAT) {
+		const double *flt = g_variant_get_fixed_array(gvar_list,
+				&num_elements, sizeof(double));
+		for (i = 0; i < num_elements; i++) {
+			if (i)
+				g_string_append_c(json, ',');
+			g_string_append_printf(json, "%f", flt[i]);
+		}
+	} else if (srci->datatype == SR_T_INT32) {
+		i32 = g_variant_get_fixed_array(gvar_list, &num_elements,
+				sizeof(int32_t));
+		for (i = 0; i < num_elements; i++) {
+			if (i)
+				g_string_append_c(json, ',');
+			g_string_append_printf(json, "%d", i32[i]);
+		}
+	} else if (srci->datatype == SR_T_UINT64_RANGE) {
+		num_elements = g_variant_n_children(gvar_list);
+		for (i = 0; i < num_elements; i++) {
+			uint64_t low, high;
+			gvar = g_variant_get_child_value(gvar_list, i);
+			g_variant_get(gvar, "(tt)", &low, &high);
+			g_variant_unref(gvar);
+			if (i)
+				g_string_append_c(json, ',');
+			g_string_append_printf(json,
+					"{\"min\":%"PRIu64",\"max\":%"PRIu64"}",
+					low, high);
+		}
+	} else if (srci->datatype == SR_T_DOUBLE_RANGE) {
+		num_elements = g_variant_n_children(gvar_list);
+		for (i = 0; i < num_elements; i++) {
+			double dlow, dhigh;
+			gvar = g_variant_get_child_value(gvar_list, i);
+			g_variant_get(gvar, "(dd)", &dlow, &dhigh);
+			g_variant_unref(gvar);
+			if (i)
+				g_string_append_c(json, ',');
+			g_string_append_printf(json,
+					"{\"min\":%f,\"max\":%f}", dlow, dhigh);
+		}
+	}
+
+	g_string_append_c(json, ']');
+	g_variant_unref(gvar_list);
+}
+
+void show_dev_detail_json(void)
+{
+	struct sr_dev_driver *driver_from_opt, *driver;
+	struct sr_dev_inst *sdi;
+	const struct sr_key_info *srci;
+	struct sr_channel *ch;
+	struct sr_channel_group *channel_group, *cg;
+	GSList *devices, *cgl, *chl, *l;
+	GVariant *gvar, *gvar_dict, *gvar_list;
+	GArray *opts;
+	GString *json;
+	uint32_t key, o;
+	gsize num_elements;
+	const char *vendor, *model;
+	gboolean first, cont_available = FALSE, cont_value = FALSE;
+	gboolean stream_value = FALSE;
+
+	if (parse_driver(opt_drv, &driver_from_opt, NULL))
+		(void)driver_from_opt;
+
+	json = g_string_new("{");
+
+	if (!(devices = device_scan())) {
+		g_string_append(json, "\"error\":\"no_devices\"}\n");
+		printf("%s", json->str);
+		g_string_free(json, TRUE);
+		return;
+	}
+
+	if (g_slist_length(devices) > 1) {
+		g_string_append(json, "\"error\":\"multiple_devices\"}\n");
+		printf("%s", json->str);
+		g_string_free(json, TRUE);
+		g_slist_free(devices);
+		return;
+	}
+
+	sdi = devices->data;
+	g_slist_free(devices);
+	driver = sr_dev_inst_driver_get(sdi);
+	vendor = sr_dev_inst_vendor_get(sdi);
+	model = sr_dev_inst_model_get(sdi);
+
+	g_string_append(json, "\"driver\":\"");
+	show_json_escape(json, driver->name);
+	g_string_append(json, "\",\"key\":\"");
+	show_json_escape(json, driver->name);
+	if (maybe_config_get(driver, sdi, NULL, SR_CONF_CONN, &gvar) == SR_OK) {
+		g_string_append(json, ":conn=");
+		show_json_escape(json, g_variant_get_string(gvar, NULL));
+		g_variant_unref(gvar);
+	}
+	g_string_append_c(json, '"');
+	if (vendor && vendor[0]) {
+		g_string_append(json, ",\"vendor\":\"");
+		show_json_escape(json, vendor);
+		g_string_append_c(json, '"');
+	}
+	if (model && model[0]) {
+		g_string_append(json, ",\"model\":\"");
+		show_json_escape(json, model);
+		g_string_append_c(json, '"');
+	}
+
+	if (sr_dev_open(sdi) != SR_OK) {
+		g_string_append(json, ",\"error\":\"open_failed\"}\n");
+		printf("%s", json->str);
+		g_string_free(json, TRUE);
+		return;
+	}
+
+	if (set_dev_options_array_phase(sdi, opt_configs,
+			CONFIG_APPLY_DEVICE_MODE) != SR_OK ||
+			select_channels(sdi) != SR_OK ||
+			set_dev_options_array_phase(sdi, opt_configs,
+				CONFIG_APPLY_REMAINING) != SR_OK) {
+		g_string_append(json, ",\"error\":\"config_apply_failed\"}\n");
+		printf("%s", json->str);
+		g_string_free(json, TRUE);
+		goto close_device;
+	}
+
+	/* Channels. */
+	g_string_append(json, ",\"channels\":[");
+	first = TRUE;
+	for (l = sr_dev_inst_channels_get(sdi); l; l = l->next) {
+		ch = l->data;
+		if (!first)
+			g_string_append_c(json, ',');
+		first = FALSE;
+		g_string_append_printf(json,
+				"{\"index\":%d,\"name\":\"", ch->index);
+		show_json_escape(json, ch->name);
+		g_string_append_printf(json,
+				"\",\"type\":\"%s\",\"enabled\":%s}",
+				ch->type == SR_CHANNEL_LOGIC ? "logic" : "analog",
+				ch->enabled ? "true" : "false");
+	}
+	g_string_append_c(json, ']');
+
+	/* Channel groups. */
+	channel_group = lookup_channel_group(sdi, NULL);
+	g_string_append(json, ",\"channelGroups\":[");
+	first = TRUE;
+	for (cgl = sr_dev_inst_channel_groups_get(sdi); cgl; cgl = cgl->next) {
+		cg = cgl->data;
+		if (!first)
+			g_string_append_c(json, ',');
+		first = FALSE;
+		g_string_append(json, "{\"name\":\"");
+		show_json_escape(json, cg->name);
+		g_string_append(json, "\",\"channels\":[");
+		gboolean cfirst = TRUE;
+		for (chl = cg->channels; chl; chl = chl->next) {
+			ch = chl->data;
+			if (!cfirst)
+				g_string_append_c(json, ',');
+			cfirst = FALSE;
+			g_string_append_printf(json, "%d", ch->index);
+		}
+		g_string_append(json, "]}");
+	}
+	g_string_append_c(json, ']');
+
+	/* Configurations. */
+	g_string_append(json, ",\"configs\":[");
+	first = TRUE;
+	if ((opts = sr_dev_options(driver, sdi, channel_group))) {
+		for (o = 0; o < opts->len; o++) {
+			int caps;
+			key = g_array_index(opts, uint32_t, o);
+			if (!(srci = sr_key_info_get(SR_KEY_CONFIG, key)))
+				continue;
+			if (key == SR_CONF_TRIGGER_MATCH)
+				continue;
+			caps = sr_dev_config_capabilities_list(sdi, channel_group, key);
+			if (!first)
+				g_string_append_c(json, ',');
+			first = FALSE;
+			g_string_append(json, "{\"id\":\"");
+			show_json_escape(json, srci->id);
+			g_string_append_printf(json,
+					"\",\"type\":\"%s\",\"gettable\":%s,\"settable\":%s,"
+					"\"listable\":%s,\"applyPhase\":\"%s\"",
+					json_datatype_name(srci->datatype),
+					(caps & SR_CONF_GET) ? "true" : "false",
+					(caps & SR_CONF_SET) ? "true" : "false",
+					(caps & SR_CONF_LIST) ? "true" : "false",
+					key == SR_CONF_DEVICE_MODE ? "device-mode" : "remaining");
+
+			if (maybe_config_get(driver, sdi, channel_group, key,
+					&gvar) == SR_OK) {
+				switch (srci->datatype) {
+				case SR_T_STRING:
+					g_string_append(json, ",\"current\":\"");
+					show_json_escape(json,
+						g_variant_get_string(gvar, NULL));
+					g_string_append_c(json, '"');
+					if (key == SR_CONF_DEVICE_MODE &&
+							!g_strcmp0(g_variant_get_string(gvar, NULL),
+								"stream"))
+						stream_value = TRUE;
+					break;
+				case SR_T_BOOL:
+					g_string_append_printf(json,
+						",\"current\":%s",
+						g_variant_get_boolean(gvar) ?
+							"true" : "false");
+					break;
+				case SR_T_UINT64:
+				case SR_T_UINT32:
+					g_string_append_printf(json,
+						",\"current\":%"PRIu64,
+						g_variant_get_uint64(gvar));
+					break;
+				case SR_T_INT32:
+					g_string_append_printf(json,
+						",\"current\":%d",
+						g_variant_get_int32(gvar));
+					break;
+				case SR_T_FLOAT:
+					g_string_append_printf(json,
+						",\"current\":%f",
+						g_variant_get_double(gvar));
+					break;
+				case SR_T_DOUBLE_RANGE:
+				{
+					double dlow, dhigh;
+					g_variant_get(gvar, "(dd)", &dlow, &dhigh);
+					g_string_append_printf(json,
+						",\"current\":{\"min\":%f,\"max\":%f}",
+						dlow, dhigh);
+					break;
+				}
+				default:
+					break;
+				}
+				g_variant_unref(gvar);
+			}
+
+			if (caps & SR_CONF_LIST) {
+				g_string_append(json, ",\"values\":");
+				show_config_values_json(json, driver, sdi,
+						channel_group, key, srci);
+			}
+			g_string_append_c(json, '}');
+		}
+	}
+	g_string_append_c(json, ']');
+
+	/* Samplerate range for devices exposing min/max/step. */
+	if (maybe_config_list(driver, sdi, channel_group, SR_CONF_SAMPLERATE,
+			&gvar_dict) == SR_OK) {
+		if ((gvar_list = g_variant_lookup_value(gvar_dict,
+				"samplerate-steps", G_VARIANT_TYPE("at")))) {
+			const uint64_t *steps = g_variant_get_fixed_array(gvar_list,
+					&num_elements, sizeof(uint64_t));
+			if (num_elements >= 3)
+				g_string_append_printf(json,
+					",\"samplerateRange\":{\"min\":%"PRIu64
+					",\"max\":%"PRIu64",\"step\":%"PRIu64"}",
+					steps[0], steps[1], steps[2]);
+			g_variant_unref(gvar_list);
+		}
+		g_variant_unref(gvar_dict);
+	}
+
+	/* Triggers. */
+	g_string_append(json, ",\"triggers\":[");
+	if (maybe_config_list(driver, sdi, channel_group, SR_CONF_TRIGGER_MATCH,
+			&gvar_list) == SR_OK) {
+		const int32_t *codes = g_variant_get_fixed_array(gvar_list,
+				&num_elements, sizeof(int32_t));
+		first = TRUE;
+		for (o = 0; o < num_elements; o++) {
+			char c = trigger_char(codes[o]);
+			if (!c)
+				continue;
+			if (!first)
+				g_string_append_c(json, ',');
+			first = FALSE;
+			g_string_append_printf(json, "\"%c\"", c);
+		}
+		g_variant_unref(gvar_list);
+	}
+	g_string_append_c(json, ']');
+
+	/* Limit samples. */
+	if (maybe_config_list(driver, sdi, channel_group, SR_CONF_LIMIT_SAMPLES,
+			&gvar_list) == SR_OK) {
+		uint64_t low, high;
+		g_variant_get(gvar_list, "(tt)", &low, &high);
+		g_string_append_printf(json,
+				",\"limitSamples\":{\"min\":%"PRIu64",\"max\":%"PRIu64"}",
+				low, high);
+		g_variant_unref(gvar_list);
+	}
+
+	/* Capabilities: continuous must come from config_get, not has_option. */
+	if (maybe_config_get(driver, sdi, channel_group, SR_CONF_CONTINUOUS,
+			&gvar) == SR_OK) {
+		cont_available = TRUE;
+		cont_value = g_variant_get_boolean(gvar);
+		g_variant_unref(gvar);
+	}
+	g_string_append_printf(json,
+			",\"capabilities\":{\"continuous\":%s,\"continuousAvailable\":%s,"
+			"\"stream\":%s}",
+			cont_value ? "true" : "false",
+			cont_available ? "true" : "false",
+			(cont_value || stream_value) ? "true" : "false");
+
+	g_string_append(json, "}\n");
+	printf("%s", json->str);
+	g_string_free(json, TRUE);
+
+close_device:
+	sr_dev_close(sdi);
 }

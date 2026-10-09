@@ -126,6 +126,79 @@ $expected = & (Join-Path $PSScriptRoot '../tests/expected-build-manifest.ps1') -
 & (Join-Path $PSScriptRoot '../tests/runtime-paths.ps1') -PackagePath $PackagePath
 & (Join-Path $PSScriptRoot '../tests/run-custom-fixtures.ps1') -PackagePath $PackagePath -ExpectedDrivers $expected.Drivers -ExpectedDecoders $expected.Decoders
 
+$sigrokCli = Join-Path $PackagePath 'sigrok-cli.exe'
+
+function Get-SigrokStreamFrames {
+    param([Parameter(Mandatory)][string]$Path)
+    $bytes = [IO.File]::ReadAllBytes($Path)
+    $frames = New-Object System.Collections.Generic.List[object]
+    $i = 0
+    while ($i + 16 -le $bytes.Length) {
+        if (-not ($bytes[$i] -eq 0x50 -and $bytes[$i + 1] -eq 0x52 -and
+                $bytes[$i + 2] -eq 0x42 -and $bytes[$i + 3] -eq 0x53)) {
+            throw "sigrok-cli --stream magic mismatch at offset $i."
+        }
+        $type = [int]$bytes[$i + 5]
+        $length = [BitConverter]::ToUInt32($bytes, $i + 12)
+        $frames.Add([pscustomobject]@{ Type = $type; Length = $length }) | Out-Null
+        $i += 16 + [int]$length
+    }
+    if ($i -ne $bytes.Length) { throw 'sigrok-cli --stream produced a trailing partial frame.' }
+    return $frames
+}
+
+# Capabilities JSON must advertise the streaming + schema versions the panel gates on.
+$capabilitiesRaw = (& $sigrokCli --capabilities --json) | Out-String
+$capabilities = $capabilitiesRaw | ConvertFrom-Json
+if ([int]$capabilities.streamProtocol -lt 1 -or [int]$capabilities.jsonSchema -lt 1) {
+    throw "sigrok-cli capabilities JSON is missing streaming support: $capabilitiesRaw"
+}
+
+# Live-ish capture: the demo driver must emit an analyzable binary frame sequence.
+$streamOut = [IO.Path]::GetTempFileName()
+$streamErr = [IO.Path]::GetTempFileName()
+try {
+    $proc = Start-Process -FilePath $sigrokCli -NoNewWindow -Wait -PassThru `
+        -ArgumentList @('-d', 'demo', '--samples', '1024', '--stream') `
+        -RedirectStandardOutput $streamOut -RedirectStandardError $streamErr
+    if ($proc.ExitCode -ne 0) { throw "sigrok-cli --stream exited with $($proc.ExitCode)." }
+    $frames = Get-SigrokStreamFrames -Path $streamOut
+    if (-not ($frames | Where-Object { $_.Type -eq 2 })) {
+        throw 'sigrok-cli -d demo --stream produced no LOGIC frame.'
+    }
+    if (-not ($frames | Where-Object { $_.Type -eq 8 })) {
+        throw 'sigrok-cli -d demo --stream produced no END frame.'
+    }
+} finally {
+    Remove-Item -LiteralPath $streamOut, $streamErr -Force -ErrorAction SilentlyContinue
+}
+
+# Session-file replay must reuse the same stream pipeline.
+$artifactDir = Join-Path ([IO.Path]::GetTempPath()) ("probes-sigrok-artifact-" + [Guid]::NewGuid().ToString('N'))
+New-Item -ItemType Directory -Force -Path $artifactDir | Out-Null
+$replayOut = [IO.Path]::GetTempFileName()
+$replayErr = [IO.Path]::GetTempFileName()
+try {
+    $capture = Start-Process -FilePath $sigrokCli -NoNewWindow -Wait -PassThru `
+        -ArgumentList @('-d', 'demo', '--samples', '2048', '--output-dir', $artifactDir) `
+        -RedirectStandardOutput $replayOut -RedirectStandardError $replayErr
+    if ($capture.ExitCode -ne 0) { throw "sigrok-cli artifact capture exited with $($capture.ExitCode)." }
+    $sessionFile = Join-Path $artifactDir 'capture.sr'
+    if (-not (Test-Path -LiteralPath $sessionFile)) { throw 'Artifact capture did not produce capture.sr.' }
+
+    $replay = Start-Process -FilePath $sigrokCli -NoNewWindow -Wait -PassThru `
+        -ArgumentList @('-i', $sessionFile, '--stream') `
+        -RedirectStandardOutput $replayOut -RedirectStandardError $replayErr
+    if ($replay.ExitCode -ne 0) { throw "sigrok-cli --input-file --stream exited with $($replay.ExitCode)." }
+    $replayFrames = Get-SigrokStreamFrames -Path $replayOut
+    if (-not ($replayFrames | Where-Object { $_.Type -eq 2 })) {
+        throw 'sigrok-cli --input-file --stream produced no LOGIC frame.'
+    }
+} finally {
+    Remove-Item -LiteralPath $replayOut, $replayErr -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $artifactDir -Recurse -Force -ErrorAction SilentlyContinue
+}
+
 $expectedPaths = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
 foreach ($file in $manifest.files) { [void]$expectedPaths.Add($file.path) }
 $unexpected = Get-ChildItem -LiteralPath $PackagePath -Recurse -File |

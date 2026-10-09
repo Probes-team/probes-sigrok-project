@@ -49,6 +49,9 @@ void show_supported(void);
 void show_supported_wiki(void);
 void show_dev_list(void);
 void show_dev_detail(void);
+void show_dev_list_json(void);
+void show_dev_detail_json(void);
+void show_capabilities_json(void);
 void show_pd_detail(void);
 void show_input(void);
 void show_output(void);
@@ -90,6 +93,7 @@ int set_dev_options_array_phase(struct sr_dev_inst *sdi, char **opts,
 		enum config_apply_phase phase);
 int set_dev_options(struct sr_dev_inst *sdi, GHashTable *args);
 void run_session(void);
+void run_stream_session(void);
 
 /* input.c */
 void load_input_file(gboolean do_props);
@@ -164,6 +168,10 @@ extern gchar *opt_time;
 extern gchar *opt_samples;
 extern gchar *opt_frames;
 extern gboolean opt_continuous;
+extern gboolean opt_stream;
+extern gchar *opt_stream_protocol;
+extern gboolean opt_json;
+extern gboolean opt_capabilities;
 extern gchar **opt_gets;
 extern gboolean opt_set;
 extern gboolean opt_list_serial;

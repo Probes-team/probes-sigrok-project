@@ -22,6 +22,7 @@
 #include <glib.h>
 #include "sigrok-cli.h"
 #include "runtime_paths.h"
+#include "stream.h"
 
 struct sr_context *sr_ctx = NULL;
 #ifdef HAVE_SRD
@@ -30,6 +31,8 @@ struct srd_session *srd_sess = NULL;
 
 static gboolean data_operation_requested(void)
 {
+	if (opt_stream)
+		return FALSE;
 	if (opt_input_file && !opt_show)
 		return TRUE;
 	return opt_samples || opt_time || opt_frames || opt_continuous;
@@ -254,6 +257,11 @@ int main(int argc, char **argv)
 		return 1;
 	}
 
+	if (opt_stream && stream_ensure_binary_stdout() != SR_OK) {
+		g_critical("Failed to switch stdout to binary mode.");
+		return 1;
+	}
+
 	/* Set the loglevel (amount of messages to output) for libsigrok. */
 	if (sr_log_loglevel_set(opt_loglevel) != SR_OK)
 		goto done;
@@ -327,7 +335,9 @@ int main(int argc, char **argv)
 		show_pd_prepare();
 #endif
 
-	if (opt_version)
+	if (opt_capabilities)
+		show_capabilities_json();
+	else if (opt_version)
 		show_version();
 	else if (opt_list_supported)
 		show_supported();
@@ -342,19 +352,21 @@ int main(int argc, char **argv)
 	else if (opt_transform_module && opt_show)
 		show_transform();
 	else if (opt_scan_devs)
-		show_dev_list();
+		opt_json ? show_dev_list_json() : show_dev_list();
 #ifdef HAVE_SRD
 	else if (opt_pds && opt_show)
 		show_pd_detail();
 #endif
 	else if (opt_show)
-		show_dev_detail();
+		opt_json ? show_dev_detail_json() : show_dev_detail();
 	else if (opt_input_file)
 		load_input_file(FALSE);
 	else if (opt_gets)
 		get_options();
 	else if (opt_set)
 		set_options();
+	else if (opt_stream)
+		run_stream_session();
 	else if (opt_samples || opt_time || opt_frames || opt_continuous)
 		run_session();
 	else if (opt_list_serial)

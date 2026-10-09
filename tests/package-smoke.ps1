@@ -81,6 +81,32 @@ try {
         throw 'Explicit stdout mode did not return the demo data stream.'
     }
 
+    $streamOut = [IO.Path]::GetTempFileName()
+    $streamErr = [IO.Path]::GetTempFileName()
+    try {
+        $streamProc = Start-Process -FilePath $exe -NoNewWindow -Wait -PassThru `
+            -ArgumentList @('-d', 'demo', '--samples', '4', '--stream') `
+            -RedirectStandardOutput $streamOut -RedirectStandardError $streamErr
+        if ($streamProc.ExitCode -ne 0) { throw "Stream capture failed: $(Get-Content -LiteralPath $streamErr -Raw)" }
+        $streamBytes = [IO.File]::ReadAllBytes($streamOut)
+        if ($streamBytes.Length -lt 16 -or
+            -not ($streamBytes[0] -eq 0x50 -and $streamBytes[1] -eq 0x52 -and
+                  $streamBytes[2] -eq 0x42 -and $streamBytes[3] -eq 0x53)) {
+            throw 'Stream capture did not start with the PRBS frame header.'
+        }
+        $hasLogic = $false
+        $hasEnd = $false
+        $offset = 0
+        while ($offset + 16 -le $streamBytes.Length) {
+            if ($streamBytes[$offset + 5] -eq 2) { $hasLogic = $true }
+            if ($streamBytes[$offset + 5] -eq 8) { $hasEnd = $true }
+            $offset += 16 + [int][BitConverter]::ToUInt32($streamBytes, $offset + 12)
+        }
+        if (-not $hasLogic -or -not $hasEnd) { throw 'Stream capture did not contain LOGIC and END frames.' }
+    } finally {
+        Remove-Item -LiteralPath $streamOut, $streamErr -Force -ErrorAction SilentlyContinue
+    }
+
     $supportedText = $supported -join "`n"
     foreach ($driver in $ExpectedDrivers) {
         if ($supportedText -notmatch "(?m)^\s{2}$([regex]::Escape($driver))\s") {

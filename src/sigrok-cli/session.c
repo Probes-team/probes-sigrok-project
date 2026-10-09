@@ -23,6 +23,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include "sigrok-cli.h"
+#include "stream.h"
 
 static uint64_t limit_samples = 0;
 static uint64_t limit_frames = 0;
@@ -283,8 +284,12 @@ void datafeed_in(const struct sr_dev_inst *sdi,
 
 	driver = sr_dev_inst_driver_get(sdi);
 
-	/* Skip all packets before the first header. */
-	if (packet->type != SR_DF_HEADER && !o)
+	/*
+	 * Skip packets before the first header. Decoder-only runs (for example
+	 * decoding an input file) intentionally have no output module, so packet
+	 * flow must continue while -P is active.
+	 */
+	if (packet->type != SR_DF_HEADER && !o && !opt_pds)
 		return;
 
 	/* Prepare to either process data, or "just" gather properties. */
@@ -752,7 +757,44 @@ int set_dev_options(struct sr_dev_inst *sdi, GHashTable *args)
 	return set_dev_options_phase(sdi, args, CONFIG_APPLY_ALL);
 }
 
-void run_session(void)
+static int ensure_continuous_mode(struct sr_dev_inst *sdi)
+{
+	struct sr_dev_driver *driver = sr_dev_inst_driver_get(sdi);
+	GVariant *gvar = NULL;
+	uint64_t capabilities;
+	const char *current;
+
+	if (sr_dev_has_option(sdi, SR_CONF_CONTINUOUS)) {
+		capabilities = sr_dev_config_capabilities_list(sdi, NULL,
+			SR_CONF_CONTINUOUS);
+		if (!(capabilities & SR_CONF_SET))
+			return SR_OK;
+		gvar = g_variant_new_boolean(TRUE);
+		return maybe_config_set(driver, sdi, NULL,
+			SR_CONF_CONTINUOUS, gvar);
+	}
+
+	if (!sr_dev_has_option(sdi, SR_CONF_DEVICE_MODE))
+		return SR_ERR_NA;
+
+	if (maybe_config_get(driver, sdi, NULL, SR_CONF_DEVICE_MODE,
+			&gvar) == SR_OK) {
+		current = g_variant_get_string(gvar, NULL);
+		if (g_strcmp0(current, "stream") == 0) {
+			g_variant_unref(gvar);
+			return SR_OK;
+		}
+		g_variant_unref(gvar);
+	}
+	capabilities = sr_dev_config_capabilities_list(sdi, NULL,
+		SR_CONF_DEVICE_MODE);
+	if (!(capabilities & SR_CONF_SET))
+		return SR_ERR_NA;
+	gvar = g_variant_new_string("stream");
+	return maybe_config_set(driver, sdi, NULL, SR_CONF_DEVICE_MODE, gvar);
+}
+
+static void run_acquisition_session(gboolean stream_mode)
 {
 	struct df_arg_desc df_arg;
 	GSList *devices, *real_devices, *sd;
@@ -824,8 +866,13 @@ void run_session(void)
 
 	sr_session_new(sr_ctx, &session);
 	df_arg.session = session;
-	sr_session_datafeed_callback_add(session, datafeed_in, &df_arg);
+	sr_session_datafeed_callback_add(session,
+		stream_mode ? stream_datafeed_in : datafeed_in, &df_arg);
 	df_arg.session = NULL;
+
+	/* The stream datafeed needs the session to stop itself at the limit. */
+	if (stream_mode)
+		stream_set_session(session);
 
 	if (sr_dev_open(sdi) != SR_OK) {
 		g_critical("Failed to open device.");
@@ -855,6 +902,19 @@ void run_session(void)
 		return;
 	}
 
+	/*
+	 * Bounded acquisitions keep the device in its configured mode. Forcing
+	 * the continuous/stream operation mode would switch the device mode and
+	 * reset the samplerate the user asked for on buffer-capable devices, so
+	 * only unbounded stream sessions need the device to free-run.
+	 */
+	if (stream_mode && !(opt_samples || opt_time || opt_frames)
+			&& ensure_continuous_mode(sdi) != SR_OK) {
+		g_critical("Device does not expose a continuous or stream mode.");
+		sr_session_destroy(session);
+		return;
+	}
+
 	trigger = NULL;
 	if (opt_triggers) {
 		if (!parse_triggerstring(sdi, opt_triggers, &trigger)) {
@@ -867,7 +927,7 @@ void run_session(void)
 		}
 	}
 
-	if (opt_continuous) {
+	if (!stream_mode && opt_continuous) {
 		if (!sr_dev_has_option(sdi, SR_CONF_CONTINUOUS)) {
 			g_critical("This device does not support continuous sampling.");
 			sr_session_destroy(session);
@@ -927,6 +987,14 @@ void run_session(void)
 		}
 	}
 
+	/*
+	 * Stream mode bypasses the CLI datafeed limit handling, so hand it the
+	 * sample limit to enforce. A driver that also honours the limit simply
+	 * ends the acquisition first.
+	 */
+	if (stream_mode)
+		stream_set_sample_limit(limit_samples);
+
 	if (opt_transform_module) {
 		if (!(t = setup_transform_module(sdi)))
 			g_critical("Failed to initialize transform module.");
@@ -944,13 +1012,25 @@ void run_session(void)
 		return;
 	}
 
-	if (opt_continuous)
+	/*
+	 * Every stream session reacts to an explicit stdin stop command, so a
+	 * bounded acquisition still has a stop path. A closed stdin must not
+	 * abort such a run, so EOF only stops an unbounded one.
+	 */
+	if (stream_mode)
+		stream_control_attach(session, !(opt_samples || opt_time || opt_frames));
+	else if (opt_continuous)
 		add_anykey(session);
 
 	g_main_loop_run(main_loop);
 
-	if (opt_continuous)
+	if (stream_mode)
+		stream_control_detach();
+	else if (opt_continuous)
 		clear_anykey();
+
+	if (stream_mode)
+		stream_session_end("stopped");
 
 	if (trigger)
 		sr_trigger_free(trigger);
@@ -958,4 +1038,14 @@ void run_session(void)
 	sr_session_datafeed_callback_remove_all(session);
 	g_main_loop_unref(main_loop);
 	sr_session_destroy(session);
+}
+
+void run_session(void)
+{
+	run_acquisition_session(FALSE);
+}
+
+void run_stream_session(void)
+{
+	run_acquisition_session(TRUE);
 }

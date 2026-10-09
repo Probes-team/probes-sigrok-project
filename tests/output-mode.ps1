@@ -46,6 +46,31 @@ function Read-Result([string]$Stdout) {
     return $line[0] | ConvertFrom-Json
 }
 
+function Invoke-SigrokStream([string[]]$Arguments) {
+    $outFile = [IO.Path]::GetTempFileName()
+    $errFile = [IO.Path]::GetTempFileName()
+    try {
+        $process = Start-Process -FilePath $exe -NoNewWindow -Wait -PassThru `
+            -ArgumentList $Arguments -RedirectStandardOutput $outFile -RedirectStandardError $errFile
+        $bytes = [IO.File]::ReadAllBytes($outFile)
+        $types = New-Object System.Collections.Generic.List[int]
+        $offset = 0
+        while ($offset + 16 -le $bytes.Length) {
+            if (-not ($bytes[$offset] -eq 0x50 -and $bytes[$offset + 1] -eq 0x52 -and
+                    $bytes[$offset + 2] -eq 0x42 -and $bytes[$offset + 3] -eq 0x53)) {
+                throw "Stream frame magic mismatch at offset $offset."
+            }
+            $length = [BitConverter]::ToUInt32($bytes, $offset + 12)
+            $types.Add([int]$bytes[$offset + 5]) | Out-Null
+            $offset += 16 + [int]$length
+        }
+        if ($offset -ne $bytes.Length) { throw 'Stream produced a trailing partial frame.' }
+        return [pscustomobject]@{ ExitCode = $process.ExitCode; Types = $types }
+    } finally {
+        Remove-Item -LiteralPath $outFile, $errFile -Force -ErrorAction SilentlyContinue
+    }
+}
+
 try {
     $env:PATH = "$PackagePath;$env:SystemRoot\System32;$env:SystemRoot"
     Remove-Item Env:PYTHONHOME, Env:SIGROKDECODE_DIR, Env:SIGROKDECODE_PATH -ErrorAction SilentlyContinue
@@ -111,6 +136,15 @@ try {
     $direct = Invoke-Sigrok @('-d', 'demo', '--samples', '4', '--output-mode', 'stdout')
     if ($direct.ExitCode -ne 0 -or $direct.Stdout -notmatch '(?m)^D[0-9]+:') {
         throw "Direct capture did not return the data stream: $($direct.Stderr)"
+    }
+
+    $stream = Invoke-SigrokStream @('-d', 'demo', '--samples', '4', '--stream')
+    if ($stream.ExitCode -ne 0 -or -not ($stream.Types -contains 2) -or -not ($stream.Types -contains 8)) {
+        throw "Stream mode did not produce LOGIC + END frames: $($stream.Types -join ',')"
+    }
+    $capabilities = Invoke-Sigrok @('--capabilities', '--json')
+    if ($capabilities.ExitCode -ne 0 -or $capabilities.Stdout -notmatch '"streamProtocol"\s*:\s*1') {
+        throw "Capabilities JSON did not advertise streamProtocol 1: $($capabilities.Stdout)"
     }
 
     Write-Output "Output mode checks passed: $PackagePath"

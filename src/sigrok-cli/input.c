@@ -27,6 +27,7 @@
 #include <string.h>
 #include <glib.h>
 #include "sigrok-cli.h"
+#include "stream.h"
 
 #define CHUNK_SIZE (4 * 1024 * 1024)
 
@@ -117,7 +118,10 @@ static void load_input_file_module(struct df_arg_desc *df_arg)
 	}
 	sr_session_new(sr_ctx, &session);
 	df_arg->session = session;
-	sr_session_datafeed_callback_add(session, datafeed_in, df_arg);
+	if (opt_stream)
+		stream_set_source_file();
+	sr_session_datafeed_callback_add(session,
+		opt_stream ? stream_datafeed_in : datafeed_in, df_arg);
 
 	/*
 	 * Implementation detail: The combination of reading from stdin
@@ -174,6 +178,8 @@ static void load_input_file_module(struct df_arg_desc *df_arg)
 
 	df_arg->session = NULL;
 	sr_session_destroy(session);
+	if (opt_stream)
+		stream_session_end("file");
 }
 
 void load_input_file(gboolean do_props)
@@ -211,8 +217,11 @@ void load_input_file(gboolean do_props)
 			main_loop = g_main_loop_new(NULL, FALSE);
 
 			df_arg.session = session;
+			if (opt_stream)
+				stream_set_source_file();
 			sr_session_datafeed_callback_add(session,
-				datafeed_in, &df_arg);
+				opt_stream ? stream_datafeed_in : datafeed_in,
+				&df_arg);
 			sr_session_stopped_callback_set(session,
 				(sr_session_stopped_callback)g_main_loop_quit,
 				main_loop);
@@ -222,6 +231,8 @@ void load_input_file(gboolean do_props)
 			g_main_loop_unref(main_loop);
 			df_arg.session = NULL;
 			sr_session_destroy(session);
+			if (opt_stream)
+				stream_session_end("file");
 		} else if (ret != SR_ERR) {
 			/* It's a session file, but it didn't work out somehow. */
 			g_critical("Failed to load session file.");

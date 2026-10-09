@@ -53,6 +53,10 @@ gchar *opt_time = NULL;
 gchar *opt_samples = NULL;
 gchar *opt_frames = NULL;
 gboolean opt_continuous = FALSE;
+gboolean opt_stream = FALSE;
+gchar *opt_stream_protocol = NULL;
+gboolean opt_json = FALSE;
+gboolean opt_capabilities = FALSE;
 gchar **opt_gets = NULL;
 gboolean opt_set = FALSE;
 gboolean opt_list_serial = FALSE;
@@ -163,6 +167,14 @@ static const GOptionEntry optargs[] = {
 			"Number of frames to acquire", NULL},
 	{"continuous", 0, 0, G_OPTION_ARG_NONE, &opt_continuous,
 			"Sample continuously", NULL},
+	{"stream", 0, 0, G_OPTION_ARG_NONE, &opt_stream,
+			"Emit binary stream frames on stdout", NULL},
+	{"stream-protocol", 0, 0, G_OPTION_ARG_STRING, &opt_stream_protocol,
+			"Stream protocol version", "PROTOCOL"},
+	{"json", 0, 0, G_OPTION_ARG_NONE, &opt_json,
+			"Emit machine-readable JSON", NULL},
+	{"capabilities", 0, 0, G_OPTION_ARG_NONE, &opt_capabilities,
+			"Show CLI streaming capabilities as JSON", NULL},
 	{"get", 0, 0, G_OPTION_ARG_STRING_ARRAY, &opt_gets,
 			"Get device options only", NULL},
 	{"set", 0, 0, G_OPTION_ARG_NONE, &opt_set, "Set device options only", NULL},
@@ -214,6 +226,29 @@ int parse_options(int argc, char **argv)
 		goto done;
 	}
 
+	if (!opt_stream_protocol)
+		opt_stream_protocol = g_strdup("binary-v1");
+	if (g_strcmp0(opt_stream_protocol, "binary-v1") != 0) {
+		g_critical("Unsupported stream protocol '%s'; expected binary-v1.",
+			opt_stream_protocol);
+		goto done;
+	}
+	if (opt_stream && opt_show) {
+		g_critical("--stream cannot be combined with --show.");
+		goto done;
+	}
+#ifdef HAVE_SRD
+	if (opt_stream && opt_pds) {
+		g_critical("--stream cannot be combined with protocol decoders.");
+		goto done;
+	}
+#endif
+	if (opt_capabilities && (opt_stream || opt_show || opt_scan_devs ||
+			opt_input_file)) {
+		g_critical("--capabilities cannot be combined with acquisition or show options.");
+		goto done;
+	}
+
 	if (1 != argc) {
 		g_critical("superfluous command line argument \"%s\"", argv[1]);
 		goto done;
@@ -248,6 +283,8 @@ void show_help(void)
 	printf("Example use, typical options:\n");
 	printf("  -d <driver> --scan\n");
 	printf("  -d <driver> { --samples N | --frames N | --time T | --continuous }\n");
+	printf("  -d <driver> [--samples N] --stream   (binary frames on stdout)\n");
+	printf("  --capabilities --json\n");
 	printf("  { -d <driver> | -I <format> | -O <format> %s} --show\n", SHOW_DECODER_TEXT);
 	printf("  See the manpage or the wiki for more details.\n");
 	printf("  Note: --samples/--frames/--time/--continuous is required for acquisition.\n");

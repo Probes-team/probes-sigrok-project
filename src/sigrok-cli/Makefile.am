@@ -32,6 +32,8 @@ sigrok_cli_SOURCES = \
 	show.c \
 	device.c \
 	session.c \
+	stream.c \
+	stream.h \
 	input.c \
 	output.c \
 	decode.c \

@@ -234,6 +234,17 @@ gboolean dslogic_profile_operation_is_stream(
 	return FALSE;
 }
 
+gboolean dslogic_operation_mode_is_continuous(
+		enum dslogic_operation_mode operation_mode)
+{
+	/*
+	 * Internal-test uses the streaming FPGA path on bufferless profiles,
+	 * but dslogic_apply_operation_mode() still imposes a three-second
+	 * sample cap, so it is not continuous.
+	 */
+	return operation_mode == DSLOGIC_OPERATION_STREAM;
+}
+
 const struct dslogic_channel_mode *dslogic_profile_mode_for_operation(
 		const struct dslogic_profile *profile,
 		enum dslogic_operation_mode operation_mode)
