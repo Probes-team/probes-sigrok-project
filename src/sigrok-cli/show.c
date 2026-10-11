@@ -1317,12 +1317,20 @@ static void show_config_values_json(GString *json, struct sr_dev_driver *driver,
 		}
 		g_free(strs);
 	} else if (srci->datatype == SR_T_UINT64) {
-		u64 = g_variant_get_fixed_array(gvar_list, &num_elements,
-				sizeof(uint64_t));
-		for (i = 0; i < num_elements; i++) {
-			if (i)
-				g_string_append_c(json, ',');
-			g_string_append_printf(json, "%"PRIu64, u64[i]);
+		if (g_variant_is_of_type(gvar_list, G_VARIANT_TYPE_TUPLE)) {
+			/* Standard listable uint64 keys such as limit_samples
+			 * report a single (min, max) tuple, not a fixed array. */
+			uint64_t low = 0, high = 0;
+			g_variant_get(gvar_list, "(tt)", &low, &high);
+			g_string_append_printf(json, "%"PRIu64",%"PRIu64, low, high);
+		} else if (g_variant_is_of_type(gvar_list, G_VARIANT_TYPE("at"))) {
+			u64 = g_variant_get_fixed_array(gvar_list, &num_elements,
+					sizeof(uint64_t));
+			for (i = 0; i < num_elements; i++) {
+				if (i)
+					g_string_append_c(json, ',');
+				g_string_append_printf(json, "%"PRIu64, u64[i]);
+			}
 		}
 	} else if (srci->datatype == SR_T_FLOAT) {
 		const double *flt = g_variant_get_fixed_array(gvar_list,
@@ -1386,7 +1394,6 @@ void show_dev_detail_json(void)
 	gsize num_elements;
 	const char *vendor, *model;
 	gboolean first, cont_available = FALSE, cont_value = FALSE;
-	gboolean stream_value = FALSE;
 
 	if (parse_driver(opt_drv, &driver_from_opt, NULL))
 		(void)driver_from_opt;
@@ -1519,7 +1526,7 @@ void show_dev_detail_json(void)
 					(caps & SR_CONF_GET) ? "true" : "false",
 					(caps & SR_CONF_SET) ? "true" : "false",
 					(caps & SR_CONF_LIST) ? "true" : "false",
-					key == SR_CONF_DEVICE_MODE ? "device-mode" : "remaining");
+					key == SR_CONF_CONTINUOUS ? "device-mode" : "remaining");
 
 			if (maybe_config_get(driver, sdi, channel_group, key,
 					&gvar) == SR_OK) {
@@ -1529,10 +1536,7 @@ void show_dev_detail_json(void)
 					show_json_escape(json,
 						g_variant_get_string(gvar, NULL));
 					g_string_append_c(json, '"');
-					if (key == SR_CONF_DEVICE_MODE &&
-							!g_strcmp0(g_variant_get_string(gvar, NULL),
-								"stream"))
-						stream_value = TRUE;
+					
 					break;
 				case SR_T_BOOL:
 					g_string_append_printf(json,
@@ -1641,7 +1645,7 @@ void show_dev_detail_json(void)
 			"\"stream\":%s}",
 			cont_value ? "true" : "false",
 			cont_available ? "true" : "false",
-			(cont_value || stream_value) ? "true" : "false");
+			cont_value ? "true" : "false");
 
 	g_string_append(json, "}\n");
 	printf("%s", json->str);

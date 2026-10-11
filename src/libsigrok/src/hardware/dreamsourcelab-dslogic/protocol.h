@@ -173,7 +173,7 @@ struct dev_context {
 	gboolean external_clock;
 	gboolean rle_mode;
 	gboolean filter_mode;
-	enum dslogic_operation_mode operation_mode;
+	gboolean stream;
 	int clock_edge;
 	double cur_threshold;
 	enum dslogic_fpga_state fpga_state;

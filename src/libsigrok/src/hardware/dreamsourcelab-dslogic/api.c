@@ -31,11 +31,10 @@ static const uint32_t drvopts[] = {
 };
 
 static const uint32_t devopts[] = {
-	SR_CONF_DEVICE_MODE | SR_CONF_GET | SR_CONF_SET | SR_CONF_LIST,
 	SR_CONF_CONTINUOUS | SR_CONF_GET | SR_CONF_SET,
 	SR_CONF_RLE | SR_CONF_GET | SR_CONF_SET,
 	SR_CONF_FILTER | SR_CONF_GET | SR_CONF_SET,
-	SR_CONF_LIMIT_SAMPLES | SR_CONF_GET | SR_CONF_SET,
+	SR_CONF_LIMIT_SAMPLES | SR_CONF_GET | SR_CONF_SET | SR_CONF_LIST,
 	SR_CONF_VOLTAGE_THRESHOLD | SR_CONF_GET | SR_CONF_SET | SR_CONF_LIST,
 	SR_CONF_CONN | SR_CONF_GET,
 	SR_CONF_SAMPLERATE | SR_CONF_GET | SR_CONF_SET | SR_CONF_LIST,
@@ -56,12 +55,6 @@ static const int32_t trigger_matches[] = {
 static const char *signal_edges[] = {
 	[DS_EDGE_RISING] = "rising",
 	[DS_EDGE_FALLING] = "falling",
-};
-
-static const char *operation_mode_names[] = {
-	[DSLOGIC_OPERATION_BUFFER] = "buffer",
-	[DSLOGIC_OPERATION_STREAM] = "stream",
-	[DSLOGIC_OPERATION_INTERNAL_TEST] = "internal-test",
 };
 
 static const double thresholds[][2] = {
@@ -92,46 +85,26 @@ static gboolean samplerate_is_available(const struct sr_dev_inst *sdi,
 		enabled_channel_count(sdi), samplerate, stream);
 }
 
-static int operation_mode_from_string(const char *name,
-		enum dslogic_operation_mode *operation_mode)
-{
-	enum dslogic_operation_mode candidate;
-
-	if (!name || !operation_mode)
-		return SR_ERR_ARG;
-	for (candidate = DSLOGIC_OPERATION_BUFFER;
-			candidate <= DSLOGIC_OPERATION_INTERNAL_TEST; candidate++) {
-		if (!strcmp(name, operation_mode_names[candidate])) {
-			*operation_mode = candidate;
-			return SR_OK;
-		}
-	}
-
-	return SR_ERR_ARG;
-}
-
-static int dslogic_apply_operation_mode(struct sr_dev_inst *sdi,
-		enum dslogic_operation_mode operation_mode)
+static int dslogic_apply_stream_mode(struct sr_dev_inst *sdi, gboolean stream)
 {
 	struct dev_context *devc;
 	const struct dslogic_channel_mode *mode;
 	const GSList *channels;
-	gboolean stream;
 	GArray *samplerates;
 	int ret;
 
 	if (!sdi || !(devc = sdi->priv) || !devc->profile ||
-			!dslogic_profile_operation_supported(devc->profile, operation_mode))
+			!dslogic_profile_stream_supported(devc->profile, stream))
 		return SR_ERR_NA;
 
-	mode = dslogic_profile_mode_for_operation(devc->profile, operation_mode);
+	mode = dslogic_profile_mode_for_stream(devc->profile, stream);
 	if (!mode || mode->channel_count == 0 ||
 			mode->channel_count > devc->profile->logic_channel_count)
 		return SR_ERR_ARG;
 	if (g_slist_length(sdi->channels) < mode->channel_count)
 		return SR_ERR_ARG;
 
-	/* DSView's mode transition owns the active probe count. */
+	/* A stream/buffer transition owns the active probe count. */
 	for (channels = sdi->channels; channels; channels = channels->next) {
 		struct sr_channel *channel = channels->data;
 
@@ -140,16 +113,9 @@ static int dslogic_apply_operation_mode(struct sr_dev_inst *sdi,
 			return ret;
 	}
 
-	stream = dslogic_profile_operation_is_stream(devc->profile,
-		operation_mode);
-	if (operation_mode == DSLOGIC_OPERATION_INTERNAL_TEST) {
-		/* Exact DSView derivation: buffered tests run at 100 MHz. */
-		devc->cur_samplerate = stream ? mode->max_samplerate / 10 : SR_MHZ(100);
-		devc->limit_samples = stream ? devc->cur_samplerate * 3 :
-			devc->profile->mem_depth / enabled_channel_count(sdi);
-	} else if (!devc->cur_samplerate || !samplerate_is_available(sdi,
+	if (!devc->cur_samplerate || !samplerate_is_available(sdi,
 			devc->cur_samplerate, stream)) {
-		samplerates = dslogic_profile_samplerates_for_operation(devc->profile,
+		samplerates = dslogic_profile_samplerates_for_stream(devc->profile,
 			enabled_channel_count(sdi), stream);
 		if (!samplerates)
 			return SR_ERR_MALLOC;
@@ -161,7 +127,7 @@ static int dslogic_apply_operation_mode(struct sr_dev_inst *sdi,
 		g_array_unref(samplerates);
 	}
 
-	devc->operation_mode = operation_mode;
+	devc->stream = stream;
 	devc->selected_mode = mode;
 
 	return SR_OK;
@@ -316,9 +282,9 @@ static GSList *scan(struct sr_dev_driver *di, GSList *options)
 		devc = dslogic_dev_new();
 		devc->profile = prof;
 		sdi->priv = devc;
-		if ((ret = dslogic_apply_operation_mode(sdi,
-				prof->default_operation_mode)) != SR_OK) {
-			sr_err("Failed to initialize %s operation mode.", prof->model);
+		if ((ret = dslogic_apply_stream_mode(sdi,
+				!(prof->capabilities & DSLOGIC_CAP_BUFFER))) != SR_OK) {
+			sr_err("Failed to initialize %s stream mode.", prof->model);
 			sdi->priv = NULL;
 			g_free(devc);
 			sr_dev_inst_free(sdi);
@@ -389,9 +355,9 @@ static int dev_open(struct sr_dev_inst *sdi)
 		return SR_ERR;
 	}
 
-	if (devc->operation_mode == DSLOGIC_OPERATION_UNSET &&
-			(ret = dslogic_apply_operation_mode(sdi,
-				devc->profile->default_operation_mode)) != SR_OK)
+	if (!devc->selected_mode &&
+			(ret = dslogic_apply_stream_mode(sdi,
+				!(devc->profile->capabilities & DSLOGIC_CAP_BUFFER))) != SR_OK)
 		return ret;
 
 	if (devc->cur_threshold == 0.0)
@@ -466,15 +432,8 @@ static int config_get(uint32_t key, GVariant **data,
 	case SR_CONF_EXTERNAL_CLOCK:
 		*data = g_variant_new_boolean(devc->external_clock);
 		break;
-	case SR_CONF_DEVICE_MODE:
-		if (!dslogic_profile_operation_supported(devc->profile,
-				devc->operation_mode))
-			return SR_ERR_NA;
-		*data = g_variant_new_string(operation_mode_names[devc->operation_mode]);
-		break;
 	case SR_CONF_CONTINUOUS:
-		*data = g_variant_new_boolean(
-			dslogic_operation_mode_is_continuous(devc->operation_mode));
+		*data = g_variant_new_boolean(devc->stream);
 		break;
 	case SR_CONF_RLE:
 		if (!(devc->profile->capabilities & DSLOGIC_CAP_RLE))
@@ -503,8 +462,7 @@ static int config_set(uint32_t key, GVariant *data,
 	const struct sr_dev_inst *sdi, const struct sr_channel_group *cg)
 {
 	struct dev_context *devc;
-	enum dslogic_operation_mode operation_mode;
-	int idx, ret;
+	int idx;
 	gdouble low, high;
 
 	(void)cg;
@@ -516,17 +474,12 @@ static int config_set(uint32_t key, GVariant *data,
 
 	switch (key) {
 	case SR_CONF_SAMPLERATE:
-		if (devc->operation_mode == DSLOGIC_OPERATION_INTERNAL_TEST)
-			return SR_ERR_NA;
 		if (!samplerate_is_available(sdi, g_variant_get_uint64(data),
-				dslogic_profile_operation_is_stream(devc->profile,
-					devc->operation_mode)))
+				devc->stream))
 			return SR_ERR_ARG;
 		devc->cur_samplerate = g_variant_get_uint64(data);
 		break;
 	case SR_CONF_LIMIT_SAMPLES:
-		if (devc->operation_mode == DSLOGIC_OPERATION_INTERNAL_TEST)
-			return SR_ERR_NA;
 		devc->limit_samples = g_variant_get_uint64(data);
 		break;
 	case SR_CONF_CAPTURE_RATIO:
@@ -554,21 +507,14 @@ static int config_set(uint32_t key, GVariant *data,
 	case SR_CONF_EXTERNAL_CLOCK:
 		devc->external_clock = g_variant_get_boolean(data);
 		break;
-	case SR_CONF_DEVICE_MODE:
-		if ((ret = operation_mode_from_string(g_variant_get_string(data, NULL),
-				&operation_mode)) != SR_OK)
-			return ret;
-		return dslogic_apply_operation_mode((struct sr_dev_inst *)sdi,
-			operation_mode);
 	case SR_CONF_CONTINUOUS:
-		if (g_variant_get_boolean(data))
-			return dslogic_apply_operation_mode((struct sr_dev_inst *)sdi,
-				DSLOGIC_OPERATION_STREAM);
-		if (!dslogic_profile_operation_supported(devc->profile,
-				DSLOGIC_OPERATION_BUFFER))
+	{
+		gboolean stream = g_variant_get_boolean(data);
+
+		if (!dslogic_profile_stream_supported(devc->profile, stream))
 			return SR_ERR_ARG;
-		return dslogic_apply_operation_mode((struct sr_dev_inst *)sdi,
-			DSLOGIC_OPERATION_BUFFER);
+		return dslogic_apply_stream_mode((struct sr_dev_inst *)sdi, stream);
+	}
 	case SR_CONF_RLE:
 		if (!(devc->profile->capabilities & DSLOGIC_CAP_RLE))
 			return SR_ERR_NA;
@@ -618,18 +564,35 @@ static int config_list(uint32_t key, GVariant **data,
 
 		if (!devc)
 			return SR_ERR_ARG;
-		if (devc->operation_mode == DSLOGIC_OPERATION_INTERNAL_TEST) {
-			*data = std_gvar_samplerates(&devc->cur_samplerate, 1);
-			break;
-		}
-		samplerates = dslogic_profile_samplerates_for_operation(devc->profile,
-			enabled_channel_count(sdi), dslogic_profile_operation_is_stream(
-				devc->profile, devc->operation_mode));
+		samplerates = dslogic_profile_samplerates_for_stream(devc->profile,
+			enabled_channel_count(sdi), devc->stream);
 		if (!samplerates)
 			return SR_ERR_MALLOC;
 		*data = std_gvar_samplerates((const uint64_t *)samplerates->data,
 			samplerates->len);
 		g_array_unref(samplerates);
+		break;
+	}
+	case SR_CONF_LIMIT_SAMPLES:
+	{
+		unsigned int channels;
+		uint64_t max;
+
+		if (!devc || !devc->profile)
+			return SR_ERR_ARG;
+		/*
+		 * A stream session's length is a host-side policy, not a device
+		 * capacity, so it is not reported through the device key.
+		 */
+		if (devc->stream)
+			return SR_ERR_NA;
+		channels = enabled_channel_count(sdi);
+		if (channels == 0)
+			return SR_ERR_ARG;
+		max = devc->profile->mem_depth / channels;
+		if (max == 0)
+			return SR_ERR_NA;
+		*data = std_gvar_tuple_u64(1, max);
 		break;
 	}
 	case SR_CONF_TRIGGER_MATCH:
@@ -642,7 +605,7 @@ static int config_list(uint32_t key, GVariant **data,
 	case SR_CONF_FILTER:
 		if (!devc || !devc->profile)
 			return SR_ERR_ARG;
-	if (key == SR_CONF_RLE &&
+		if (key == SR_CONF_RLE &&
 				!(devc->profile->capabilities & DSLOGIC_CAP_RLE))
 			return SR_ERR_NA;
 		if (key == SR_CONF_FILTER &&
@@ -650,24 +613,6 @@ static int config_list(uint32_t key, GVariant **data,
 			return SR_ERR_NA;
 		*data = g_variant_new_boolean(TRUE);
 		break;
-	case SR_CONF_DEVICE_MODE:
-	{
-		const gchar *modes[4];
-		size_t count = 0;
-		enum dslogic_operation_mode operation_mode;
-
-		if (!devc || !devc->profile)
-			return SR_ERR_ARG;
-		for (operation_mode = DSLOGIC_OPERATION_BUFFER;
-				operation_mode <= DSLOGIC_OPERATION_INTERNAL_TEST;
-				operation_mode++) {
-			if (dslogic_profile_operation_supported(devc->profile,
-					operation_mode))
-				modes[count++] = operation_mode_names[operation_mode];
-		}
-		*data = g_variant_new_strv(modes, count);
-		break;
-	}
 	default:
 		return SR_ERR_NA;
 	}

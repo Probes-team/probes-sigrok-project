@@ -356,7 +356,7 @@ static struct sr_dev_inst *new_fake_fpga_sdi(
 	sdi->conn = usb;
 	sdi->priv = devc;
 	devc->profile = profile;
-	devc->operation_mode = profile->default_operation_mode;
+	devc->stream = (profile->capabilities & DSLOGIC_CAP_BUFFER) ? FALSE : TRUE;
 	*devc_out = devc;
 	return sdi;
 }
@@ -559,52 +559,34 @@ START_TEST(test_standard_config_matrix)
 	ck_assert_int_eq(ret, SR_OK);
 	ck_assert_uint_eq(g_variant_get_uint64(value), SR_MHZ(250));
 
-	value = g_variant_new_string("stream");
-	ck_assert_int_eq(driver->config_set(SR_CONF_DEVICE_MODE, value, sdi, NULL), SR_OK);
 	value = g_variant_new_boolean(TRUE);
 	ck_assert_int_eq(driver->config_set(SR_CONF_CONTINUOUS, value, sdi, NULL), SR_OK);
 	ret = driver->config_get(SR_CONF_CONTINUOUS, &value, sdi, NULL);
 	ck_assert_int_eq(ret, SR_OK);
 	ck_assert(g_variant_get_boolean(value));
+	ck_assert(devc->stream);
 	value = g_variant_new_boolean(TRUE);
 	ck_assert_int_eq(driver->config_set(SR_CONF_RLE, value, sdi, NULL), SR_OK);
 	ck_assert_int_eq(driver->config_set(SR_CONF_FILTER, value, sdi, NULL), SR_OK);
-	value = g_variant_new_string("internal-test");
-	ck_assert_int_eq(driver->config_set(SR_CONF_DEVICE_MODE, value, sdi, NULL), SR_OK);
 	ck_assert(devc->rle_mode);
 	ck_assert(devc->filter_mode);
-	ck_assert_int_eq(devc->operation_mode, DSLOGIC_OPERATION_INTERNAL_TEST);
-	ret = driver->config_get(SR_CONF_CONTINUOUS, &value, sdi, NULL);
-	ck_assert_int_eq(ret, SR_OK);
-	ck_assert(!g_variant_get_boolean(value));
-	ck_assert_uint_eq(devc->cur_samplerate, SR_MHZ(100));
-	ck_assert_uint_eq(devc->limit_samples,
-		UINT64_C(2) * 1024 * 1024 * 1024 / 32);
 
 	ret = driver->config_list(SR_CONF_FILTER, &value, sdi, NULL);
 	ck_assert_int_eq(ret, SR_OK);
 	ck_assert(g_variant_get_boolean(value));
-	ret = driver->config_list(SR_CONF_DEVICE_MODE, &value, sdi, NULL);
-	ck_assert_int_eq(ret, SR_OK);
-	{
-		GVariant *mode = g_variant_get_child_value(value, 2);
-		ck_assert_str_eq(g_variant_get_string(mode, NULL), "internal-test");
-		g_variant_unref(mode);
-	}
 
-	value = g_variant_new_uint64(SR_MHZ(400));
-	ck_assert_int_eq(driver->config_set(SR_CONF_SAMPLERATE, value, sdi, NULL), SR_ERR_NA);
-	value = g_variant_new_string("buffer");
-	ck_assert_int_eq(driver->config_set(SR_CONF_DEVICE_MODE, value, sdi, NULL), SR_OK);
+	value = g_variant_new_boolean(FALSE);
+	ck_assert_int_eq(driver->config_set(SR_CONF_CONTINUOUS, value, sdi, NULL), SR_OK);
 	ret = driver->config_get(SR_CONF_CONTINUOUS, &value, sdi, NULL);
 	ck_assert_int_eq(ret, SR_OK);
 	ck_assert(!g_variant_get_boolean(value));
+	ck_assert(!devc->stream);
 	value = g_variant_new_boolean(TRUE);
 	ck_assert_int_eq(driver->config_set(SR_CONF_CONTINUOUS, value, sdi, NULL), SR_OK);
-	ck_assert_int_eq(devc->operation_mode, DSLOGIC_OPERATION_STREAM);
+	ck_assert(devc->stream);
 	value = g_variant_new_boolean(FALSE);
 	ck_assert_int_eq(driver->config_set(SR_CONF_CONTINUOUS, value, sdi, NULL), SR_OK);
-	ck_assert_int_eq(devc->operation_mode, DSLOGIC_OPERATION_BUFFER);
+	ck_assert(!devc->stream);
 	value = g_variant_new_uint64(SR_MHZ(400));
 	ck_assert_int_eq(driver->config_set(SR_CONF_SAMPLERATE, value, sdi, NULL), SR_ERR_ARG);
 	value = g_variant_new_uint64(101);
@@ -1194,7 +1176,7 @@ START_TEST(test_trigger_header_acceptance_matches_dsview_operation_semantics)
 	ck_assert_ptr_nonnull(profile);
 	devc = dslogic_dev_new();
 	devc->profile = profile;
-	devc->operation_mode = DSLOGIC_OPERATION_BUFFER;
+	devc->stream = FALSE;
 	devc->actual_limit_samples = UINT64_C(1048576);
 	ck_assert(dslogic_trigger_header_starts_data(devc, 0));
 	ck_assert(dslogic_trigger_header_starts_data(devc, UINT64_C(1048064)));
@@ -1203,7 +1185,7 @@ START_TEST(test_trigger_header_acceptance_matches_dsview_operation_semantics)
 		UINT64_C(0x5555555555555555)));
 	devc->actual_limit_samples = 0;
 	ck_assert(!dslogic_trigger_header_starts_data(devc, 0));
-	devc->operation_mode = DSLOGIC_OPERATION_STREAM;
+	devc->stream = TRUE;
 	ck_assert(dslogic_trigger_header_starts_data(devc,
 		UINT64_C(0x5555555555555555)));
 	g_free(devc);
@@ -1265,7 +1247,7 @@ START_TEST(test_fpga_wire_image_has_tlv_and_stream_bits)
 	ck_assert(read_le16(base + 6) & (1 << 3));
 	devc->rle_mode = FALSE;
 	devc->actual_limit_samples = 1024;
-	devc->operation_mode = DSLOGIC_OPERATION_STREAM;
+	devc->stream = TRUE;
 	devc->selected_mode = dslogic_profile_select_mode(profile, 32, SR_MHZ(50));
 	devc->cur_samplerate = SR_MHZ(50);
 	ck_assert_int_eq(dslogic_build_fpga_config(sdi, base,
@@ -1286,7 +1268,7 @@ START_TEST(test_fpga_wire_image_has_tlv_and_stream_bits)
 	ck_assert_int_eq(sr_trigger_match_add(stage, channel1, SR_TRIGGER_ONE, 0), SR_OK);
 	ck_assert_int_eq(sr_trigger_match_add(stage, channel31, SR_TRIGGER_FALLING, 0), SR_OK);
 	ck_assert_int_eq(sr_session_trigger_set(session, trigger), SR_OK);
-	devc->operation_mode = DSLOGIC_OPERATION_BUFFER;
+	devc->stream = FALSE;
 	devc->selected_mode = dslogic_profile_select_mode(profile, 31, SR_MHZ(50));
 	ck_assert_int_eq(dslogic_build_fpga_config(sdi, base,
 		dslogic_fpga_config_size(FALSE), extension,
@@ -1366,29 +1348,23 @@ START_TEST(test_u2pro16_profile_has_explicit_dsview_hardware_modes)
 	ck_assert_ptr_nonnull(profile);
 	ck_assert_uint_eq(profile->mem_depth, UINT64_C(4) * 1024 * 1024 * 1024);
 	ck_assert_uint_eq(profile->mode_bitmap, 0x3f);
-	ck_assert_int_eq(profile->default_operation_mode,
-		DSLOGIC_OPERATION_BUFFER);
-	ck_assert(dslogic_profile_operation_supported(profile,
-		DSLOGIC_OPERATION_INTERNAL_TEST));
-	mode = dslogic_profile_mode_for_operation(profile,
-		DSLOGIC_OPERATION_INTERNAL_TEST);
-	ck_assert_ptr_nonnull(mode);
-	ck_assert_str_eq(mode->id, "buffer-500x16");
+	ck_assert(dslogic_profile_stream_supported(profile, TRUE));
+	ck_assert(dslogic_profile_stream_supported(profile, FALSE));
 	ck_assert(profile->adf4360);
 	ck_assert_uint_eq(profile->half_samplerate, SR_MHZ(500));
 	ck_assert_uint_eq(profile->quarter_samplerate, SR_GHZ(1));
-	mode = dslogic_profile_select_mode_for_operation(profile, 16,
+	mode = dslogic_profile_select_mode_for_stream(profile, 16,
 		SR_MHZ(500), FALSE);
 	ck_assert_ptr_nonnull(mode);
 	ck_assert_str_eq(mode->id, "buffer-500x16");
 	ck_assert_uint_eq(mode->hw_min_samplerate, SR_KHZ(10));
 	ck_assert_uint_eq(mode->hw_max_samplerate, SR_MHZ(500));
 	ck_assert_uint_eq(mode->pre_div, 5);
-	mode = dslogic_profile_select_mode_for_operation(profile, 8,
+	mode = dslogic_profile_select_mode_for_stream(profile, 8,
 		SR_GHZ(1), FALSE);
 	ck_assert_ptr_nonnull(mode);
 	ck_assert_str_eq(mode->id, "buffer-1000x8");
-	mode = dslogic_profile_select_mode_for_operation(profile, 16,
+	mode = dslogic_profile_select_mode_for_stream(profile, 16,
 		SR_MHZ(20), TRUE);
 	ck_assert_ptr_nonnull(mode);
 	ck_assert_str_eq(mode->id, "stream-20x16-3dn2");
@@ -1479,8 +1455,8 @@ START_TEST(test_u2pro16_samplerate_list_and_setter_follow_enabled_channels)
 	value = g_variant_new_uint64(SR_MHZ(100));
 	ck_assert_int_eq(driver->config_set(SR_CONF_SAMPLERATE, value, sdi, NULL),
 		SR_OK);
-	value = g_variant_new_string("stream");
-	ck_assert_int_eq(driver->config_set(SR_CONF_DEVICE_MODE, value, sdi, NULL),
+	value = g_variant_new_boolean(TRUE);
+	ck_assert_int_eq(driver->config_set(SR_CONF_CONTINUOUS, value, sdi, NULL),
 		SR_OK);
 	value = g_variant_new_uint64(SR_MHZ(500));
 	ck_assert_int_eq(driver->config_set(SR_CONF_SAMPLERATE, value, sdi, NULL),
@@ -1517,11 +1493,8 @@ START_TEST(test_every_mode_has_explicit_limits)
 		size_t mode_index;
 
 		ck_assert_ptr_nonnull(profile);
-		ck_assert_uint_lt(profile->internal_test_mode, profile->mode_count);
-		ck_assert(dslogic_profile_operation_supported(profile,
-			DSLOGIC_OPERATION_INTERNAL_TEST));
-		ck_assert_ptr_nonnull(dslogic_profile_mode_for_operation(profile,
-			DSLOGIC_OPERATION_INTERNAL_TEST));
+		ck_assert(dslogic_profile_stream_supported(profile, TRUE));
+		ck_assert_ptr_nonnull(dslogic_profile_mode_for_stream(profile, TRUE));
 
 		for (mode_index = 0; mode_index < profile->mode_count; mode_index++) {
 			const struct dslogic_channel_mode *mode =
@@ -1544,14 +1517,6 @@ START_TEST(test_every_mode_has_explicit_limits)
 }
 END_TEST
 
-START_TEST(test_continuous_mode_mapping)
-{
-	ck_assert(dslogic_operation_mode_is_continuous(DSLOGIC_OPERATION_STREAM));
-	ck_assert(!dslogic_operation_mode_is_continuous(DSLOGIC_OPERATION_BUFFER));
-	ck_assert(!dslogic_operation_mode_is_continuous(DSLOGIC_OPERATION_INTERNAL_TEST));
-	ck_assert(!dslogic_operation_mode_is_continuous(DSLOGIC_OPERATION_UNSET));
-}
-END_TEST
 
 START_TEST(test_continuous_mode_rejects_bufferless_profile)
 {
@@ -1566,8 +1531,7 @@ START_TEST(test_continuous_mode_rejects_bufferless_profile)
 	srtest_driver_init(srtest_ctx, driver);
 	profile = dslogic_profile_find(0x2a0e, 0x0021, LIBUSB_SPEED_HIGH);
 	ck_assert_ptr_nonnull(profile);
-	ck_assert(!dslogic_profile_operation_supported(profile,
-		DSLOGIC_OPERATION_BUFFER));
+	ck_assert(!dslogic_profile_stream_supported(profile, FALSE));
 
 	sdi = sr_dev_inst_user_new("DreamSourceLab", "DSLogic Basic", NULL);
 	ck_assert_ptr_nonnull(sdi);
@@ -1580,20 +1544,71 @@ START_TEST(test_continuous_mode_rejects_bufferless_profile)
 		ck_assert_int_eq(sr_dev_inst_channel_add(sdi, index,
 			SR_CHANNEL_LOGIC, "D"), SR_OK);
 
-	value = g_variant_new_string("stream");
-	ck_assert_int_eq(driver->config_set(SR_CONF_DEVICE_MODE, value, sdi, NULL), SR_OK);
-	value = g_variant_new_boolean(FALSE);
-	ck_assert_int_eq(driver->config_set(SR_CONF_CONTINUOUS, value, sdi, NULL), SR_ERR_ARG);
-	ck_assert_int_eq(devc->operation_mode, DSLOGIC_OPERATION_STREAM);
 	value = g_variant_new_boolean(TRUE);
 	ck_assert_int_eq(driver->config_set(SR_CONF_CONTINUOUS, value, sdi, NULL), SR_OK);
-	ck_assert_int_eq(devc->operation_mode, DSLOGIC_OPERATION_STREAM);
+	ck_assert(devc->stream);
+	value = g_variant_new_boolean(FALSE);
+	ck_assert_int_eq(driver->config_set(SR_CONF_CONTINUOUS, value, sdi, NULL), SR_ERR_ARG);
+	ck_assert(devc->stream);
 
 	g_free(devc);
 	sdi->priv = NULL;
 }
 END_TEST
 
+START_TEST(test_limit_samples_list_tracks_device_memory_and_mode)
+{
+	struct sr_dev_driver *driver;
+	struct sr_dev_inst *sdi;
+	struct dev_context *devc;
+	const struct dslogic_profile *profile;
+	GVariant *value;
+	uint64_t low = 0, high = 0;
+	unsigned int index;
+
+	driver = srtest_driver_get("dreamsourcelab-dslogic");
+	srtest_driver_init(srtest_ctx, driver);
+	profile = dslogic_profile_find(0x2a0e, 0x002c, LIBUSB_SPEED_SUPER);
+	ck_assert_ptr_nonnull(profile);
+	sdi = sr_dev_inst_user_new("DreamSourceLab", "DSLogic U3Pro32", NULL);
+	ck_assert_ptr_nonnull(sdi);
+	devc = dslogic_dev_new();
+	ck_assert_ptr_nonnull(devc);
+	devc->profile = profile;
+	devc->stream = FALSE;
+	sdi->driver = driver;
+	sdi->priv = devc;
+	for (index = 0; index < 32; index++)
+		ck_assert_int_eq(sr_dev_inst_channel_add(sdi, index,
+			SR_CHANNEL_LOGIC, "D"), SR_OK);
+
+	/* Buffer mode reports depth / enabled channels as the sample ceiling. */
+	ck_assert_int_eq(driver->config_list(SR_CONF_LIMIT_SAMPLES, &value,
+		sdi, NULL), SR_OK);
+	g_variant_get(value, "(tt)", &low, &high);
+	ck_assert_uint_eq(low, 1);
+	ck_assert_uint_eq(high, profile->mem_depth / 32);
+	g_variant_unref(value);
+
+	/* Fewer enabled channels raise the per-sample depth. */
+	for (index = 16; index < 32; index++)
+		((struct sr_channel *)g_slist_nth_data(sdi->channels, index))->enabled = FALSE;
+	ck_assert_int_eq(driver->config_list(SR_CONF_LIMIT_SAMPLES, &value,
+		sdi, NULL), SR_OK);
+	g_variant_get(value, "(tt)", &low, &high);
+	ck_assert_uint_eq(high, profile->mem_depth / 16);
+	g_variant_unref(value);
+
+	/* A stream length is a host policy, so the device key lists nothing. */
+	devc->stream = TRUE;
+	ck_assert_int_eq(driver->config_list(SR_CONF_LIMIT_SAMPLES, &value,
+		sdi, NULL), SR_ERR_NA);
+
+	g_free(devc);
+	sdi->priv = NULL;
+	sr_dev_inst_free(sdi);
+}
+END_TEST
 Suite *suite_dreamsourcelab_dslogic(void)
 {
 	Suite *s;
@@ -1606,8 +1621,8 @@ Suite *suite_dreamsourcelab_dslogic(void)
 	tcase_add_test(tc, test_profile_samplerate_validation);
 	tcase_add_test(tc, test_u2pro16_profile_has_explicit_dsview_hardware_modes);
 	tcase_add_test(tc, test_every_mode_has_explicit_limits);
-	tcase_add_test(tc, test_continuous_mode_mapping);
 	tcase_add_test(tc, test_continuous_mode_rejects_bufferless_profile);
+	tcase_add_test(tc, test_limit_samples_list_tracks_device_memory_and_mode);
 	tcase_add_test(tc, test_invalid_channel_config_never_reaches_usb);
 	tcase_add_test(tc, test_u2pro16_samplerate_list_and_setter_follow_enabled_channels);
 	tcase_add_test(tc, test_fpga_firmware_selection_comes_from_profile);

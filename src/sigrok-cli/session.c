@@ -685,9 +685,9 @@ static gboolean config_key_in_phase(const char *key,
 		return TRUE;
 
 	if (phase == CONFIG_APPLY_DEVICE_MODE)
-		return srci->key == SR_CONF_DEVICE_MODE;
+		return srci->key == SR_CONF_CONTINUOUS;
 
-	return srci->key != SR_CONF_DEVICE_MODE;
+	return srci->key != SR_CONF_CONTINUOUS;
 }
 
 static int set_dev_options_phase(struct sr_dev_inst *sdi, GHashTable *args,
@@ -762,7 +762,6 @@ static int ensure_continuous_mode(struct sr_dev_inst *sdi)
 	struct sr_dev_driver *driver = sr_dev_inst_driver_get(sdi);
 	GVariant *gvar = NULL;
 	uint64_t capabilities;
-	const char *current;
 
 	if (sr_dev_has_option(sdi, SR_CONF_CONTINUOUS)) {
 		capabilities = sr_dev_config_capabilities_list(sdi, NULL,
@@ -774,24 +773,8 @@ static int ensure_continuous_mode(struct sr_dev_inst *sdi)
 			SR_CONF_CONTINUOUS, gvar);
 	}
 
-	if (!sr_dev_has_option(sdi, SR_CONF_DEVICE_MODE))
-		return SR_ERR_NA;
-
-	if (maybe_config_get(driver, sdi, NULL, SR_CONF_DEVICE_MODE,
-			&gvar) == SR_OK) {
-		current = g_variant_get_string(gvar, NULL);
-		if (g_strcmp0(current, "stream") == 0) {
-			g_variant_unref(gvar);
-			return SR_OK;
-		}
-		g_variant_unref(gvar);
-	}
-	capabilities = sr_dev_config_capabilities_list(sdi, NULL,
-		SR_CONF_DEVICE_MODE);
-	if (!(capabilities & SR_CONF_SET))
-		return SR_ERR_NA;
-	gvar = g_variant_new_string("stream");
-	return maybe_config_set(driver, sdi, NULL, SR_CONF_DEVICE_MODE, gvar);
+	/* No SR_CONF_CONTINUOUS support: nothing generic we can switch. */
+	return SR_ERR_NA;
 }
 
 static void run_acquisition_session(gboolean stream_mode)

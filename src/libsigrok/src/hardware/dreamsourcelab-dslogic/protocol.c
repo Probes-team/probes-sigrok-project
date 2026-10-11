@@ -1087,8 +1087,7 @@ static bool set_trigger(const struct sr_dev_inst *sdi, struct fpga_config *cfg,
 	if (trigger_point < DSLOGIC_ATOMIC_SAMPLES)
 		trigger_point = DSLOGIC_ATOMIC_SAMPLES;
 	mem_depth = devc->profile->mem_depth;
-	max_trigger_point = dslogic_profile_operation_is_stream(devc->profile,
-			devc->operation_mode) ? ((mem_depth * 10) / 100) :
+	max_trigger_point = devc->stream ? ((mem_depth * 10) / 100) :
 		((mem_depth * DS_MAX_TRIG_PERCENT) / 100);
 	if (trigger_point > max_trigger_point)
 		trigger_point = max_trigger_point;
@@ -1168,8 +1167,6 @@ SR_PRIV int dslogic_build_fpga_config(const struct sr_dev_inst *sdi,
 	if (set_trigger(sdi, cfg, (devc->profile->capabilities &
 			DSLOGIC_CAP_32_CHANNELS) ? cfg32 : NULL))
 		mode |= DS_MODE_TRIG_EN;
-	if (devc->operation_mode == DSLOGIC_OPERATION_INTERNAL_TEST)
-		mode |= DS_MODE_INT_TEST;
 	if (devc->profile->half_samplerate &&
 			devc->cur_samplerate == devc->profile->half_samplerate)
 		mode |= DS_MODE_HALF_MODE;
@@ -1179,8 +1176,7 @@ SR_PRIV int dslogic_build_fpga_config(const struct sr_dev_inst *sdi,
 	transform_trigger_words(cfg, (devc->profile->capabilities &
 			DSLOGIC_CAP_32_CHANNELS) ? cfg32 : NULL, devc->profile->adf4360,
 		mode & DS_MODE_HALF_MODE, mode & DS_MODE_QUAR_MODE);
-	if (dslogic_profile_operation_is_stream(devc->profile,
-			devc->operation_mode))
+	if (devc->stream)
 		mode |= DS_MODE_STREAM_MODE;
 	if (devc->external_clock) {
 		mode |= DS_MODE_CLK_TYPE;
@@ -1537,7 +1533,7 @@ SR_PRIV struct dev_context *dslogic_dev_new(void)
 	devc->capture_ratio = 0;
 	devc->rle_mode = FALSE;
 	devc->filter_mode = FALSE;
-	devc->operation_mode = DSLOGIC_OPERATION_UNSET;
+	devc->stream = FALSE;
 	devc->selected_mode = NULL;
 	devc->clock_edge = DS_EDGE_RISING;
 	devc->fpga_state = DSLOGIC_FPGA_UNKNOWN;
@@ -1598,8 +1594,7 @@ SR_PRIV gboolean dslogic_trigger_header_starts_data(
 {
 	if (!devc || !devc->profile)
 		return FALSE;
-	if (dslogic_profile_operation_is_stream(devc->profile,
-			devc->operation_mode))
+	if (devc->stream)
 		return TRUE;
 
 	/* Mirrors DSView receive_header() for buffered logic captures. */
@@ -1873,8 +1868,7 @@ static int receive_data(int fd, int revents, void *cb_data)
 	/* DSView polls HW_STATUS after 16 quiet event-loop turns in stream mode.
 	 * Sigrok has no SR_DF_OVERFLOW packet, so retain the hardware fact in the
 	 * standard error/end path rather than introducing a private packet type. */
-	if (dslogic_profile_operation_is_stream(devc->profile,
-			devc->operation_mode) && devc->empty_poll_count > 16) {
+	if (devc->stream && devc->empty_poll_count > 16) {
 		if (dslogic_control_read(usb->devhdl, DSLOGIC_CTL_HW_STATUS, 0,
 				&hw_status, sizeof(hw_status)) == SR_OK &&
 				dslogic_hw_status_has_overflow(hw_status)) {
@@ -1893,8 +1887,7 @@ static size_t to_bytes_per_ms(const struct sr_dev_inst *sdi)
 	const struct dev_context *const devc = sdi->priv;
 	const size_t ch_count = enabled_channel_count(sdi);
 
-	if (dslogic_profile_operation_is_stream(devc->profile,
-			devc->operation_mode))
+	if (devc->stream)
 		return (devc->cur_samplerate * ch_count) / (1000 * 8);
 
 
@@ -2111,8 +2104,7 @@ static void LIBUSB_CALL trigger_receive(struct libusb_transfer *transfer)
 				free_transfer(transfer);
 				return;
 			}
-			if (!dslogic_profile_operation_is_stream(devc->profile,
-					devc->operation_mode))
+			if (!devc->stream)
 				devc->actual_limit_samples =
 					(devc->actual_limit_samples - remain_count) &
 					~(DSLOGIC_ATOMIC_SAMPLES - 1);
@@ -2271,8 +2263,7 @@ SR_PRIV int dslogic_acquisition_start_with_ops(const struct sr_dev_inst *sdi,
 	if (!devc->profile || !sdi->conn || !channel_count ||
 			channel_count > devc->profile->logic_channel_count ||
 			!devc->cur_samplerate ||
-			!dslogic_profile_operation_supported(devc->profile,
-				devc->operation_mode))
+			!dslogic_profile_stream_supported(devc->profile, devc->stream))
 		return SR_ERR_ARG;
 	devc->ctx = ((struct drv_context *)sdi->driver->context)->sr_ctx;
 	devc->sent_samples = 0;
@@ -2291,19 +2282,12 @@ SR_PRIV int dslogic_acquisition_start_with_ops(const struct sr_dev_inst *sdi,
 	devc->actual_limit_samples = devc->limit_samples ?
 		(devc->limit_samples + DSLOGIC_ATOMIC_SAMPLES - 1) &
 		~(DSLOGIC_ATOMIC_SAMPLES - 1) : 0;
-	if (devc->operation_mode == DSLOGIC_OPERATION_INTERNAL_TEST)
-		devc->selected_mode = dslogic_profile_mode_for_operation(devc->profile,
-			devc->operation_mode);
-	else
-		devc->selected_mode = dslogic_profile_select_mode_for_operation(
-			devc->profile, channel_count, devc->cur_samplerate,
-			dslogic_profile_operation_is_stream(devc->profile,
-				devc->operation_mode));
+	devc->selected_mode = dslogic_profile_select_mode_for_stream(
+		devc->profile, channel_count, devc->cur_samplerate, devc->stream);
 	if (!devc->selected_mode) {
 		sr_err("No DSLogic channel mode supports %u channels at samplerate %" PRIu64
 			" in %s mode.", channel_count, devc->cur_samplerate,
-		dslogic_profile_operation_is_stream(devc->profile,
-			devc->operation_mode) ? "stream" : "buffer");
+		devc->stream ? "stream" : "buffer");
 		return SR_ERR_ARG;
 	}
 	if (devc->fpga_needs_upload &&

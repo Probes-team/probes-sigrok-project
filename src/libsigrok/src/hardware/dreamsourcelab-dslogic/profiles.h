@@ -25,16 +25,6 @@ enum dslogic_capability {
 	DSLOGIC_CAP_FILTER = 1 << 8,
 };
 
-/* Mirrors DSView's buffer, stream, and internal-test operation states. */
-enum dslogic_operation_mode {
-	DSLOGIC_OPERATION_UNSET,
-	DSLOGIC_OPERATION_BUFFER,
-	DSLOGIC_OPERATION_STREAM,
-	DSLOGIC_OPERATION_INTERNAL_TEST,
-};
-
-#define DSLOGIC_OPERATION_MASK(mode) (UINT32_C(1) << (mode))
-
 struct dslogic_channel_mode {
 	const char *id;
 	unsigned int channel_count;
@@ -63,9 +53,6 @@ struct dslogic_profile {
 	size_t mode_count;
 	size_t default_mode;
 	uint32_t mode_bitmap;
-	uint32_t operation_modes;
-	enum dslogic_operation_mode default_operation_mode;
-	size_t internal_test_mode;
 	gboolean adf4360;
 	uint64_t half_samplerate;
 	uint64_t quarter_samplerate;
@@ -78,11 +65,11 @@ SR_PRIV const struct dslogic_channel_mode *dslogic_profile_mode_at(
 SR_PRIV const struct dslogic_channel_mode *dslogic_profile_select_mode(
 		const struct dslogic_profile *profile, unsigned int enabled_channels,
 		uint64_t samplerate);
-SR_PRIV const struct dslogic_channel_mode *dslogic_profile_select_mode_for_operation(
+SR_PRIV const struct dslogic_channel_mode *dslogic_profile_select_mode_for_stream(
 		const struct dslogic_profile *profile, unsigned int enabled_channels,
 		uint64_t samplerate, gboolean stream);
 /* Caller owns the returned GArray, whose elements are uint64_t samplerates. */
-SR_PRIV GArray *dslogic_profile_samplerates_for_operation(
+SR_PRIV GArray *dslogic_profile_samplerates_for_stream(
 		const struct dslogic_profile *profile, unsigned int enabled_channels,
 		gboolean stream);
 SR_PRIV gboolean dslogic_profile_samplerate_is_available(
@@ -91,18 +78,14 @@ SR_PRIV gboolean dslogic_profile_samplerate_is_available(
 SR_PRIV gboolean dslogic_profile_samplerate_supported(
 		const struct dslogic_profile *profile,
 		const struct dslogic_channel_mode *mode, uint64_t samplerate);
-SR_PRIV gboolean dslogic_profile_operation_supported(
-		const struct dslogic_profile *profile,
-		enum dslogic_operation_mode operation_mode);
-SR_PRIV gboolean dslogic_profile_operation_is_stream(
-		const struct dslogic_profile *profile,
-		enum dslogic_operation_mode operation_mode);
-/* TRUE only for modes that run without a driver-imposed sample/time cap. */
-SR_PRIV gboolean dslogic_operation_mode_is_continuous(
-		enum dslogic_operation_mode operation_mode);
-SR_PRIV const struct dslogic_channel_mode *dslogic_profile_mode_for_operation(
-		const struct dslogic_profile *profile,
-		enum dslogic_operation_mode operation_mode);
+/*
+ * TRUE when the profile can run in the requested stream/buffer class:
+ * stream is always available, buffer only for DSLOGIC_CAP_BUFFER profiles.
+ */
+SR_PRIV gboolean dslogic_profile_stream_supported(
+		const struct dslogic_profile *profile, gboolean stream);
+SR_PRIV const struct dslogic_channel_mode *dslogic_profile_mode_for_stream(
+		const struct dslogic_profile *profile, gboolean stream);
 /* NULL means the profile supports normal operation only after USB firmware is loaded. */
 SR_PRIV const char *dslogic_profile_fx2_firmware(
 		const struct dslogic_profile *profile);
