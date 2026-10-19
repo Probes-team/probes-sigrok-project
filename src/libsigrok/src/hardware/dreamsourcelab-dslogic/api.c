@@ -372,6 +372,10 @@ static int dev_open(struct sr_dev_inst *sdi)
 		dslogic_close_and_release(sdi);
 		return ret;
 	}
+	if ((ret = dslogic_init_adf4360_clock(sdi)) != SR_OK) {
+		dslogic_close_and_release(sdi);
+		return ret;
+	}
 	devc->threshold_needs_apply = FALSE;
 
 	return SR_OK;

@@ -34,6 +34,10 @@ sigrok_cli_SOURCES = \
 	session.c \
 	stream.c \
 	stream.h \
+	stream_proto.c \
+	stream_proto.h \
+	mirror.c \
+	mirror.h \
 	input.c \
 	output.c \
 	decode.c \

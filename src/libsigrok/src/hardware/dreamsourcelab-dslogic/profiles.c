@@ -102,10 +102,14 @@ static const struct dslogic_channel_mode modes_u3_32_super[] = {
 	MODE("buffer-1000x8", 8, SR_MHZ(1), SR_GHZ(1), SR_KHZ(10), SR_MHZ(500), 5, FALSE),
 };
 
-#define PROFILE(vid_, pid_, speed_, model_, fw_, fpga3_, fpga5_, depth_, channels_, caps_, modes_, default_) \
+#define PROFILE_DEFINE(vid_, pid_, speed_, model_, fw_, fpga3_, fpga5_, depth_, channels_, caps_, modes_, default_, adf4360_) \
 	{ vid_, pid_, speed_, "DreamSourceLab", model_, NULL, fw_, fpga3_, fpga5_, \
 		depth_, channels_, caps_, modes_, G_N_ELEMENTS(modes_), default_, 0, \
-		FALSE, 0, 0 }
+		adf4360_, 0, 0 }
+#define PROFILE(vid_, pid_, speed_, model_, fw_, fpga3_, fpga5_, depth_, channels_, caps_, modes_, default_) \
+	PROFILE_DEFINE(vid_, pid_, speed_, model_, fw_, fpga3_, fpga5_, depth_, channels_, caps_, modes_, default_, FALSE)
+#define PROFILE_ADF4360(vid_, pid_, speed_, model_, fw_, fpga3_, fpga5_, depth_, channels_, caps_, modes_, default_) \
+	PROFILE_DEFINE(vid_, pid_, speed_, model_, fw_, fpga3_, fpga5_, depth_, channels_, caps_, modes_, default_, TRUE)
 #define PROFILE_U2PRO16 \
 	{ 0x2a0e, 0x002d, LIBUSB_SPEED_HIGH, "DreamSourceLab", "DSLogic U2Pro16", NULL, \
 		NULL, DSLOGIC_FIRMWARE("DSLogicU2Pro16.bin"), DSLOGIC_FIRMWARE("DSLogicU2Pro16.bin"), \
@@ -135,23 +139,23 @@ static const struct dslogic_profile profiles[] = {
 		NULL, DSLOGIC_FIRMWARE("DSLogicU2Basic.bin"), DSLOGIC_FIRMWARE("DSLogicU2Basic.bin"), DSLOGIC_MIB(64), 16,
 		DSLOGIC_CAP_BUFFER | DSLOGIC_CAP_VOLTAGE_THRESHOLD | DSLOGIC_CAP_RLE |
 		DSLOGIC_CAP_FILTER, modes_u2basic, 4),
-	PROFILE(0x2a0e, 0x002a, LIBUSB_SPEED_HIGH, "DSLogic U3Pro16",
+	PROFILE_ADF4360(0x2a0e, 0x002a, LIBUSB_SPEED_HIGH, "DSLogic U3Pro16",
 		NULL, DSLOGIC_FIRMWARE("DSLogicU3Pro16.bin"), DSLOGIC_FIRMWARE("DSLogicU3Pro16.bin"), DSLOGIC_GIB(2), 16,
 		DSLOGIC_CAP_BUFFER | DSLOGIC_CAP_VOLTAGE_THRESHOLD |
 		DSLOGIC_CAP_RLE | DSLOGIC_CAP_FILTER,
 		modes_u3_16_high, 4),
-	PROFILE(0x2a0e, 0x002a, LIBUSB_SPEED_SUPER, "DSLogic U3Pro16",
+	PROFILE_ADF4360(0x2a0e, 0x002a, LIBUSB_SPEED_SUPER, "DSLogic U3Pro16",
 		NULL, DSLOGIC_FIRMWARE("DSLogicU3Pro16.bin"), DSLOGIC_FIRMWARE("DSLogicU3Pro16.bin"), DSLOGIC_GIB(2), 16,
 		DSLOGIC_CAP_BUFFER | DSLOGIC_CAP_VOLTAGE_THRESHOLD |
 		DSLOGIC_CAP_RLE | DSLOGIC_CAP_FILTER,
 		modes_u3_16_super, 4),
-	PROFILE(0x2a0e, 0x002c, LIBUSB_SPEED_HIGH, "DSLogic U3Pro32",
+	PROFILE_ADF4360(0x2a0e, 0x002c, LIBUSB_SPEED_HIGH, "DSLogic U3Pro32",
 		NULL, DSLOGIC_FIRMWARE("DSLogicU3Pro32.bin"), DSLOGIC_FIRMWARE("DSLogicU3Pro32.bin"), DSLOGIC_GIB(2), 32,
 		DSLOGIC_CAP_BUFFER | DSLOGIC_CAP_VOLTAGE_THRESHOLD |
 		DSLOGIC_CAP_32_CHANNELS | DSLOGIC_CAP_RLE |
 		DSLOGIC_CAP_FILTER,
 		modes_u3_32_high, 5),
-	PROFILE(0x2a0e, 0x002c, LIBUSB_SPEED_SUPER, "DSLogic U3Pro32",
+	PROFILE_ADF4360(0x2a0e, 0x002c, LIBUSB_SPEED_SUPER, "DSLogic U3Pro32",
 		NULL, DSLOGIC_FIRMWARE("DSLogicU3Pro32.bin"), DSLOGIC_FIRMWARE("DSLogicU3Pro32.bin"), DSLOGIC_GIB(2), 32,
 		DSLOGIC_CAP_BUFFER | DSLOGIC_CAP_VOLTAGE_THRESHOLD |
 		DSLOGIC_CAP_32_CHANNELS | DSLOGIC_CAP_RLE |

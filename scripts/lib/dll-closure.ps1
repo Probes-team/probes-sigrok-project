@@ -21,7 +21,10 @@ function Test-WindowsSystemDll {
         'kernelbase.dll', 'msvcrt.dll', 'netapi32.dll', 'ntdll.dll', 'ole32.dll',
         'oleaut32.dll', 'propsys.dll', 'rpcrt4.dll', 'secur32.dll', 'setupapi.dll',
         'shell32.dll', 'ucrtbase.dll', 'user32.dll', 'userenv.dll', 'version.dll',
-        'winmm.dll', 'ws2_32.dll'
+        'winmm.dll', 'ws2_32.dll', 'dnsapi.dll', 'nsi.dll', 'shlwapi.dll', 'mswsock.dll',
+        'dwmapi.dll', 'powrprof.dll', 'winhttp.dll', 'wldap32.dll', 'dhcpcsvc.dll',
+        'dhcpcsvc6.dll', 'authz.dll', 'cryptbase.dll', 'profapi.dll', 'msimg32.dll',
+        'wtsapi32.dll', 'mpr.dll', 'netutils.dll', 'srvcli.dll'
     )
 }
 

@@ -44,6 +44,8 @@ struct fake_fpga_upload {
 	uint8_t control_destinations[96];
 	uint16_t control_offsets[96];
 	uint8_t control_values[96];
+	uint8_t control_lengths[96];
+	uint8_t control_data[96][4];
 	uint8_t control_read_destinations[96];
 	uint16_t control_read_offsets[96];
 	uint8_t control_read_values[96];
@@ -111,6 +113,12 @@ static int fake_fpga_control_write(void *data, libusb_device_handle *devhdl,
 	fake->control_destinations[fake->control_count++] = destination;
 	fake->control_offsets[fake->control_count - 1] = offset;
 	fake->control_values[fake->control_count - 1] = length ? buffer[0] : 0;
+	fake->control_lengths[fake->control_count - 1] = length;
+	memset(fake->control_data[fake->control_count - 1], 0,
+		sizeof(fake->control_data[0]));
+	if (length)
+		memcpy(fake->control_data[fake->control_count - 1], buffer,
+			MIN(length, sizeof(fake->control_data[0])));
 	if (fake->control_write_fail_at == fake->control_count)
 		return SR_ERR_IO;
 	return SR_OK;
@@ -219,6 +227,7 @@ struct fake_acquisition_start {
 	int event_source_result;
 	int start_result;
 	int recover_result;
+	int drain_result;
 	gboolean aborted_at_recover;
 };
 
@@ -305,11 +314,14 @@ static void fake_start_remove_event_source(void *data,
 	fake_start_record(data, FAKE_START_REMOVE_EVENT_SOURCE);
 }
 
-static void fake_start_cancel_and_drain(void *data,
+static int fake_start_cancel_and_drain(void *data,
 		const struct sr_dev_inst *sdi)
 {
+	struct fake_acquisition_start *fake = data;
+
 	(void)sdi;
-	fake_start_record(data, FAKE_START_CANCEL_AND_DRAIN);
+	fake_start_record(fake, FAKE_START_CANCEL_AND_DRAIN);
+	return fake->drain_result;
 }
 
 static int fake_start_recover(void *data, const struct sr_dev_inst *sdi)
@@ -464,6 +476,101 @@ START_TEST(test_profile_identity_is_unique)
 		ck_assert_uint_gt(profile->logic_channel_count, 0);
 		ck_assert_uint_lt(profile->default_mode, profile->mode_count);
 	}
+}
+END_TEST
+
+START_TEST(test_adf4360_profiles_are_explicit)
+{
+	static const struct test_profile_identity adf_profiles[] = {
+		{ 0x002a, LIBUSB_SPEED_HIGH },
+		{ 0x002a, LIBUSB_SPEED_SUPER },
+		{ 0x002c, LIBUSB_SPEED_HIGH },
+		{ 0x002c, LIBUSB_SPEED_SUPER },
+		{ 0x002d, LIBUSB_SPEED_HIGH },
+	};
+	const struct dslogic_profile *legacy;
+	unsigned int index;
+
+	legacy = dslogic_profile_find(0x2a0e, 0x0001, LIBUSB_SPEED_HIGH);
+	ck_assert_ptr_nonnull(legacy);
+	ck_assert(!legacy->adf4360);
+	for (index = 0; index < G_N_ELEMENTS(adf_profiles); index++) {
+		const struct dslogic_profile *profile = dslogic_profile_find(
+			0x2a0e, adf_profiles[index].pid, adf_profiles[index].speed);
+
+		ck_assert_ptr_nonnull(profile);
+		ck_assert(profile->adf4360);
+	}
+}
+END_TEST
+
+START_TEST(test_adf4360_clock_programs_dsview_sequence)
+{
+	static const uint8_t expected_offsets[] = {
+		0x4a,
+		0x48, 0x48, 0x48, 0x48,
+		0x48, 0x48, 0x48, 0x48,
+		0x48, 0x48, 0x48, 0x48,
+	};
+	static const uint8_t expected_values[] = {
+		0x01,
+		0x01, 0x61, 0x00, 0x30,
+		0x01, 0x40, 0xf1, 0x46,
+		0x01, 0x62, 0x3d, 0x40,
+	};
+	const struct dslogic_profile *profile;
+	struct sr_dev_inst *sdi;
+	struct dev_context *devc;
+	struct fake_fpga_upload fake = { 0 };
+	unsigned int index;
+
+	profile = dslogic_profile_find(0x2a0e, 0x002c, LIBUSB_SPEED_HIGH);
+	ck_assert_ptr_nonnull(profile);
+	sdi = new_fake_fpga_sdi(profile, &devc);
+	ck_assert_int_eq(dslogic_init_adf4360_clock_with_ops(sdi,
+		&fake_fpga_upload_ops, &fake), SR_OK);
+	ck_assert_uint_eq(fake.control_count, G_N_ELEMENTS(expected_offsets));
+	for (index = 0; index < G_N_ELEMENTS(expected_offsets); index++) {
+		ck_assert_uint_eq(fake.control_destinations[index], 14);
+		ck_assert_uint_eq(fake.control_offsets[index], expected_offsets[index]);
+		ck_assert_uint_eq(fake.control_lengths[index], 1);
+		ck_assert_uint_eq(fake.control_data[index][0], expected_values[index]);
+	}
+	free_fake_fpga_sdi(sdi);
+}
+END_TEST
+
+START_TEST(test_adf4360_clock_is_skipped_without_capability)
+{
+	const struct dslogic_profile *profile;
+	struct sr_dev_inst *sdi;
+	struct dev_context *devc;
+	struct fake_fpga_upload fake = { 0 };
+
+	profile = dslogic_profile_find(0x2a0e, 0x0001, LIBUSB_SPEED_HIGH);
+	ck_assert_ptr_nonnull(profile);
+	sdi = new_fake_fpga_sdi(profile, &devc);
+	ck_assert_int_eq(dslogic_init_adf4360_clock_with_ops(sdi,
+		&fake_fpga_upload_ops, &fake), SR_OK);
+	ck_assert_uint_eq(fake.control_count, 0);
+	free_fake_fpga_sdi(sdi);
+}
+END_TEST
+
+START_TEST(test_adf4360_clock_propagates_write_failure)
+{
+	const struct dslogic_profile *profile;
+	struct sr_dev_inst *sdi;
+	struct dev_context *devc;
+	struct fake_fpga_upload fake = { .control_write_fail_at = 2 };
+
+	profile = dslogic_profile_find(0x2a0e, 0x002c, LIBUSB_SPEED_HIGH);
+	ck_assert_ptr_nonnull(profile);
+	sdi = new_fake_fpga_sdi(profile, &devc);
+	ck_assert_int_eq(dslogic_init_adf4360_clock_with_ops(sdi,
+		&fake_fpga_upload_ops, &fake), SR_ERR_IO);
+	ck_assert_uint_eq(fake.control_count, 2);
+	free_fake_fpga_sdi(sdi);
 }
 END_TEST
 
@@ -1026,6 +1133,11 @@ START_TEST(test_acquisition_stop_drains_before_recover)
 	ck_assert(fake.aborted_at_recover);
 	fake = (struct fake_acquisition_start) { .recover_result = SR_ERR_IO };
 	ck_assert_int_eq(dslogic_acquisition_stop_with_ops(sdi, &ops, &fake), SR_ERR_IO);
+	ck_assert_mem_eq(fake.events, expected_events, sizeof(expected_events));
+	ck_assert(fake.aborted_at_recover);
+	fake = (struct fake_acquisition_start) { .drain_result = SR_ERR_TIMEOUT };
+	ck_assert_int_eq(dslogic_acquisition_stop_with_ops(sdi, &ops, &fake),
+		SR_ERR_TIMEOUT);
 	ck_assert_mem_eq(fake.events, expected_events, sizeof(expected_events));
 	ck_assert(fake.aborted_at_recover);
 	free_fake_fpga_sdi(sdi);
@@ -1617,6 +1729,10 @@ Suite *suite_dreamsourcelab_dslogic(void)
 	s = suite_create("dreamsourcelab-dslogic");
 	tc = tcase_create("profiles");
 	tcase_add_test(tc, test_profile_identity_is_unique);
+	tcase_add_test(tc, test_adf4360_profiles_are_explicit);
+	tcase_add_test(tc, test_adf4360_clock_programs_dsview_sequence);
+	tcase_add_test(tc, test_adf4360_clock_is_skipped_without_capability);
+	tcase_add_test(tc, test_adf4360_clock_propagates_write_failure);
 	tcase_add_test(tc, test_profile_mode_limits);
 	tcase_add_test(tc, test_profile_samplerate_validation);
 	tcase_add_test(tc, test_u2pro16_profile_has_explicit_dsview_hardware_modes);

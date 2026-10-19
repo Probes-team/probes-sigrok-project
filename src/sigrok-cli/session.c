@@ -24,6 +24,7 @@
 #include <stdlib.h>
 #include "sigrok-cli.h"
 #include "stream.h"
+#include "mirror.h"
 
 static uint64_t limit_samples = 0;
 static uint64_t limit_frames = 0;
@@ -853,6 +854,11 @@ static void run_acquisition_session(gboolean stream_mode)
 		stream_mode ? stream_datafeed_in : datafeed_in, &df_arg);
 	df_arg.session = NULL;
 
+	/* A file-mode data operation also mirrors its live frames to the deck
+	 * broker when one is advertised; a stream session already owns stdout. */
+	if (!stream_mode)
+		mirror_attach(session);
+
 	/* The stream datafeed needs the session to stop itself at the limit. */
 	if (stream_mode)
 		stream_set_session(session);
@@ -1014,6 +1020,8 @@ static void run_acquisition_session(gboolean stream_mode)
 
 	if (stream_mode)
 		stream_session_end("stopped");
+
+	mirror_detach();
 
 	if (trigger)
 		sr_trigger_free(trigger);

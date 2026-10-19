@@ -126,13 +126,13 @@ struct dslogic_acquisition_start_ops {
 	int (*start)(void *data, const struct sr_dev_inst *sdi);
 	void (*send_header)(void *data, const struct sr_dev_inst *sdi);
 	void (*remove_event_source)(void *data, const struct sr_dev_inst *sdi);
-	void (*cancel_and_drain)(void *data, const struct sr_dev_inst *sdi);
+	int (*cancel_and_drain)(void *data, const struct sr_dev_inst *sdi);
 	int (*recover)(void *data, const struct sr_dev_inst *sdi);
 };
 
 struct dslogic_acquisition_stop_ops {
 	int (*recover)(void *data, const struct sr_dev_inst *sdi);
-	void (*cancel_and_drain)(void *data, const struct sr_dev_inst *sdi);
+	int (*cancel_and_drain)(void *data, const struct sr_dev_inst *sdi);
 };
 
 struct dev_context {
@@ -228,6 +228,9 @@ SR_PRIV int dslogic_verify_loaded_fpga(const struct sr_dev_inst *sdi);
 SR_PRIV int dslogic_recover_device_state(const struct sr_dev_inst *sdi);
 SR_PRIV int dslogic_recover_device_state_with_ops(const struct sr_dev_inst *sdi,
 		const struct dslogic_fpga_upload_ops *ops, void *ops_data);
+SR_PRIV int dslogic_init_adf4360_clock_with_ops(const struct sr_dev_inst *sdi,
+		const struct dslogic_fpga_upload_ops *ops, void *ops_data);
+SR_PRIV int dslogic_init_adf4360_clock(const struct sr_dev_inst *sdi);
 SR_PRIV int dslogic_fpga_configure_with_ops(const struct sr_dev_inst *sdi,
 		const struct dslogic_fpga_upload_ops *ops, void *ops_data);
 SR_PRIV int dslogic_upload_fx2_if_needed(struct sr_context *ctx,

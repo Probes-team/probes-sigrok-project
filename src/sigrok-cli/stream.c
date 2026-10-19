@@ -20,20 +20,7 @@
 
 #include "sigrok-cli.h"
 #include "stream.h"
-
-#define STREAM_MAGIC "PRBS"
-#define STREAM_VERSION 1
-
-enum stream_frame_type {
-	STREAM_FRAME_META = 1,
-	STREAM_FRAME_LOGIC = 2,
-	STREAM_FRAME_TRIGGER = 3,
-	STREAM_FRAME_FRAME_BEGIN = 4,
-	STREAM_FRAME_FRAME_END = 5,
-	STREAM_FRAME_STATS = 6,
-	STREAM_FRAME_ERROR = 7,
-	STREAM_FRAME_SESSION_END = 8,
-};
+#include "stream_proto.h"
 
 static guint32 stream_sequence;
 static guint64 stream_total_samples;
@@ -51,121 +38,19 @@ static struct sr_session *stream_session;
 static GIOChannel *stream_control_channel;
 static guint stream_control_source_id;
 
-static void stream_write_u16(FILE *out, guint16 value)
-{
-	guint8 bytes[2] = { value & 0xff, (value >> 8) & 0xff };
-	fwrite(bytes, 1, sizeof(bytes), out);
-}
-
-static void stream_write_u32(FILE *out, guint32 value)
-{
-	guint8 bytes[4] = {
-		value & 0xff, (value >> 8) & 0xff,
-		(value >> 16) & 0xff, (value >> 24) & 0xff,
-	};
-	fwrite(bytes, 1, sizeof(bytes), out);
-}
-
 static void stream_write_frame(guint8 type, const void *payload, guint32 length)
 {
-	FILE *out = stdout;
+	GByteArray *frame = g_byte_array_new();
 
-	fwrite(STREAM_MAGIC, 1, 4, out);
-	fputc(STREAM_VERSION, out);
-	fputc(type, out);
-	stream_write_u16(out, 0);
-	stream_write_u32(out, stream_sequence++);
-	stream_write_u32(out, length);
-	if (length && payload)
-		fwrite(payload, 1, length, out);
-	fflush(out);
-}
-
-static void stream_json_escape(GString *json, const char *text)
-{
-	const unsigned char *p = (const unsigned char *)(text ? text : "");
-
-	for (; *p; p++) {
-		switch (*p) {
-		case '"': g_string_append(json, "\\\""); break;
-		case '\\': g_string_append(json, "\\\\"); break;
-		case '\n': g_string_append(json, "\\n"); break;
-		case '\r': g_string_append(json, "\\r"); break;
-		case '\t': g_string_append(json, "\\t"); break;
-		default:
-			if (*p < 0x20)
-				g_string_append_printf(json, "\\u%04x", *p);
-			else
-				g_string_append_c(json, (gchar)*p);
-		}
-	}
-}
-
-static const char *stream_channel_type_name(int type)
-{
-	return type == SR_CHANNEL_LOGIC ? "logic" : "other";
-}
-
-static GString *stream_build_meta(const struct sr_dev_inst *sdi, guint16 unitsize)
-{
-	struct sr_dev_driver *driver = sr_dev_inst_driver_get(sdi);
-	GSList *channels = sr_dev_inst_channels_get(sdi), *l;
-	GVariant *gvar = NULL;
-	GString *json = g_string_new("{");
-	guint64 samplerate = 0;
-	gchar *device_mode = NULL;
-	gboolean continuous = FALSE;
-	gboolean first = TRUE;
-
-	if (maybe_config_get(driver, sdi, NULL, SR_CONF_SAMPLERATE, &gvar) == SR_OK) {
-		samplerate = g_variant_get_uint64(gvar);
-		g_variant_unref(gvar);
-	}
-	if (maybe_config_get(driver, sdi, NULL, SR_CONF_CONTINUOUS, &gvar) == SR_OK) {
-		continuous = g_variant_get_boolean(gvar);
-		g_variant_unref(gvar);
-	}
-	if (maybe_config_get(driver, sdi, NULL, SR_CONF_DEVICE_MODE, &gvar) == SR_OK) {
-		device_mode = g_strdup(g_variant_get_string(gvar, NULL));
-		g_variant_unref(gvar);
-	}
-
-	g_string_append(json, "\"driver\":\"");
-	stream_json_escape(json, driver->name);
-	g_string_append(json, "\",\"mode\":\"");
-	stream_json_escape(json, stream_source);
-	g_string_append(json, "\",");
-	g_string_append_printf(json, "\"samplerate\":%" G_GUINT64_FORMAT ",", samplerate);
-	g_string_append_printf(json, "\"unitsize\":%u,", unitsize);
-	g_string_append(json, "\"channels\":[");
-	for (l = channels; l; l = l->next) {
-		struct sr_channel *channel = l->data;
-		if (!channel->enabled)
-			continue;
-		if (!first)
-			g_string_append_c(json, ',');
-		first = FALSE;
-		g_string_append_printf(json, "{\"index\":%d,\"name\":\"", channel->index);
-		stream_json_escape(json, channel->name);
-		g_string_append_printf(json, "\",\"type\":\"%s\",\"enabled\":true}",
-			stream_channel_type_name(channel->type));
-	}
-	g_string_append(json, "],\"capabilities\":{");
-	g_string_append_printf(json, "\"continuous\":%s,", continuous ? "true" : "false");
-	g_string_append(json, "\"stream\":true");
-	if (device_mode) {
-		g_string_append(json, ",\"deviceMode\":\"");
-		stream_json_escape(json, device_mode);
-		g_string_append_c(json, '"');
-		g_free(device_mode);
-	}
-	g_string_append(json, "},\"streamProtocol\":1}");
-	return json;
+	stream_proto_append_frame(frame, type, stream_sequence++, payload, length);
+	fwrite(frame->data, 1, frame->len, stdout);
+	fflush(stdout);
+	g_byte_array_free(frame, TRUE);
 }
 
 static void stream_send_meta(const struct sr_dev_inst *sdi, guint16 unitsize)
 {
-	GString *json = stream_build_meta(sdi, unitsize);
+	GString *json = stream_build_meta(sdi, unitsize, stream_source);
 	stream_write_frame(STREAM_FRAME_META, json->str, json->len);
 	g_string_free(json, TRUE);
 	stream_meta_sent = TRUE;
