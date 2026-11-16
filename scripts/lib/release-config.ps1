@@ -13,5 +13,9 @@ function Get-ReleaseConfig {
 function Get-ToolchainConfig {
     param([Parameter(Mandatory)][string]$ProjectRoot)
 
-    return Import-PowerShellDataFile (Join-Path $ProjectRoot 'config/toolchain.psd1')
+    $config = Import-PowerShellDataFile (Join-Path $ProjectRoot 'config/toolchain.psd1')
+    if (-not [string]::IsNullOrWhiteSpace($env:PROBES_SIGROK_MSYS_ROOT)) {
+        $config.MsysRoot = [IO.Path]::GetFullPath($env:PROBES_SIGROK_MSYS_ROOT)
+    }
+    return $config
 }

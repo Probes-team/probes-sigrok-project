@@ -20,10 +20,10 @@ foreach ($sourceRoot in $sourceRoots) {
 $fullPath = [IO.Path]::GetFullPath($projectRoot)
 $drive = $fullPath.Substring(0, 1).ToLowerInvariant()
 $msysProjectRoot = '/' + $drive + $fullPath.Substring(2).Replace('\', '/')
-$buildScript = "$msysProjectRoot/scripts/build-mingw64.sh"
+$buildScript = "$msysProjectRoot/scripts/build-ucrt64.sh"
 $projectCommit = (git -C $projectRoot rev-parse HEAD).Trim()
 
-& (Join-Path $PSScriptRoot 'invoke-mingw64.ps1') -Script "bash '$buildScript' '$msysProjectRoot' '$Configuration' '$($config.Target)' '$projectCommit'"
+& (Join-Path $PSScriptRoot 'invoke-ucrt64.ps1') -Script "bash '$buildScript' '$msysProjectRoot' '$Configuration' '$($config.Target)' '$projectCommit'"
 
 $buildManifest = Join-Path $projectRoot '.work/build-manifest.json'
 if (-not (Test-Path -LiteralPath $buildManifest)) {

@@ -392,5 +392,6 @@ done:
 	if (sr_ctx)
 		sr_exit(sr_ctx);
 
-	return 0;
+	return artifact_result == 0
+		&& (!stream_capture_requested() || stream_capture_succeeded()) ? 0 : 1;
 }

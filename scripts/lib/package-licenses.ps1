@@ -18,11 +18,11 @@ function Copy-PackageLicenses {
         Copy-Item -LiteralPath $_.FullName -Destination $destination -Force
     }
 
-    $msysLicenses = Join-Path $Toolchain.MsysRoot 'mingw64/share/licenses'
+    $msysLicenses = Join-Path $Toolchain.MsysRoot 'ucrt64/share/licenses'
     if (Test-Path -LiteralPath $msysLicenses) {
         Get-ChildItem -LiteralPath $msysLicenses -Recurse -File | ForEach-Object {
             $relative = $_.FullName.Substring($msysLicenses.Length + 1)
-            $destination = Join-Path $licenseRoot ('mingw64/' + $relative)
+            $destination = Join-Path $licenseRoot ('ucrt64/' + $relative)
             New-Item -ItemType Directory -Force -Path (Split-Path -Parent $destination) | Out-Null
             Copy-Item -LiteralPath $_.FullName -Destination $destination -Force
         }

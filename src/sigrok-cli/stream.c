@@ -35,8 +35,15 @@ static gboolean stream_stop_on_eof;
 static guint64 stream_sample_limit;
 static const char *stream_source = "live";
 static struct sr_session *stream_session;
+static const struct sr_output *capture_output;
+static struct artifact_context *capture_context;
+static char *capture_final_path;
+static gboolean capture_failed;
+static gboolean capture_committed;
 static GIOChannel *stream_control_channel;
 static guint stream_control_source_id;
+
+static gboolean stream_stop_idle(gpointer data);
 
 static void stream_write_frame(guint8 type, const void *payload, guint32 length)
 {
@@ -97,6 +104,23 @@ static void stream_send_logic(const struct sr_dev_inst *sdi,
 	}
 	if (sample_count == 0)
 		return;
+	if (capture_output && !capture_failed) {
+		struct sr_datafeed_logic clipped = *logic;
+		struct sr_datafeed_packet packet;
+		GString *out = NULL;
+		int ret;
+
+		clipped.length = length;
+		packet.type = SR_DF_LOGIC;
+		packet.payload = &clipped;
+		ret = sr_output_send(capture_output, &packet, &out);
+		if (out)
+			g_string_free(out, TRUE);
+		if (ret != SR_OK) {
+			capture_failed = TRUE;
+			g_idle_add(stream_stop_idle, NULL);
+		}
+	}
 	payload = g_byte_array_sized_new(20 + length);
 	byte_array_append_u64(payload, stream_total_samples);
 	byte_array_append_u64(payload, sample_count);
@@ -106,6 +130,62 @@ static void stream_send_logic(const struct sr_dev_inst *sdi,
 	stream_write_frame(STREAM_FRAME_LOGIC, payload->data, payload->len);
 	g_byte_array_free(payload, TRUE);
 	stream_total_samples += sample_count;
+	artifact_note_samples(capture_context, sample_count, 0, 0);
+}
+
+static void capture_finish(gboolean received_end)
+{
+	GString *out = NULL;
+	struct sr_datafeed_packet end = { .type = SR_DF_END, .payload = NULL };
+	gboolean success;
+
+	if (!capture_context)
+		return;
+	if (capture_output) {
+		if (received_end && sr_output_send(capture_output, &end, &out) != SR_OK)
+			capture_failed = TRUE;
+		if (out)
+			g_string_free(out, TRUE);
+		if (sr_output_free(capture_output) != SR_OK)
+			capture_failed = TRUE;
+		capture_output = NULL;
+	}
+	success = received_end && !capture_failed && stream_total_samples > 0;
+	capture_committed = success;
+	if (artifact_context_finish_silent(capture_context, success) != 0) {
+		capture_committed = FALSE;
+		capture_failed = TRUE;
+	}
+	capture_context = NULL;
+}
+
+static void capture_header(const struct sr_dev_inst *sdi)
+{
+	if (opt_input_file || strcmp(stream_source, "live") != 0)
+		return;
+	if (artifact_context_begin(ARTIFACT_OUTPUT_FILE, opt_output_dir,
+			"capture", &capture_context) != 0) {
+		capture_failed = TRUE;
+		g_idle_add(stream_stop_idle, NULL);
+		return;
+	}
+	capture_final_path = g_strdup(artifact_capture_final_path(capture_context));
+	capture_output = sr_output_new(sr_output_find("srzip"), NULL, sdi,
+		artifact_capture_path(capture_context));
+	if (!capture_output) {
+		capture_failed = TRUE;
+		g_idle_add(stream_stop_idle, NULL);
+	}
+}
+
+gboolean stream_capture_requested(void)
+{
+	return opt_stream && !opt_input_file;
+}
+
+gboolean stream_capture_succeeded(void)
+{
+	return capture_committed && !capture_failed;
 }
 
 static gboolean stream_stop_idle(gpointer data)
@@ -220,9 +300,13 @@ void stream_session_end(const char *reason)
 {
 	GString *json;
 	GString *stats;
+	gboolean finalize_capture;
 
 	if (stream_end_sent)
 		return;
+	finalize_capture = g_strcmp0(reason, "stopped") == 0 ||
+		g_strcmp0(reason, "samples-reached") == 0;
+	capture_finish(finalize_capture);
 	stream_end_sent = TRUE;
 
 	stats = g_string_new("{\"totalSamples\":");
@@ -232,12 +316,19 @@ void stream_session_end(const char *reason)
 	g_string_free(stats, TRUE);
 
 	json = g_string_new("{\"reason\":\"");
-	stream_json_escape(json, reason ? reason : "stopped");
-	g_string_append_printf(json, "\",\"totalSamples\":%" G_GUINT64_FORMAT ",\"triggered\":%s}",
+	stream_json_escape(json, capture_failed ? "capture-error" : reason ? reason : "stopped");
+	g_string_append_printf(json, "\",\"totalSamples\":%" G_GUINT64_FORMAT ",\"triggered\":%s",
 		stream_total_samples, stream_triggered ? "true" : "false");
+	if (capture_committed) {
+		g_string_append(json, ",\"capturePath\":\"");
+		stream_json_escape(json, capture_final_path);
+		g_string_append_c(json, '"');
+	}
+	g_string_append_c(json, '}');
 	stream_write_frame(STREAM_FRAME_SESSION_END, json->str, json->len);
 	g_string_free(json, TRUE);
 	fflush(stdout);
+	g_clear_pointer(&capture_final_path, g_free);
 }
 
 void stream_datafeed_in(const struct sr_dev_inst *sdi,
@@ -256,7 +347,19 @@ void stream_datafeed_in(const struct sr_dev_inst *sdi,
 		stream_meta_sent = FALSE;
 		stream_stop_requested = FALSE;
 		stream_limit_reached = FALSE;
+		capture_header(sdi);
 		stream_send_meta(sdi, 0);
+		break;
+	case SR_DF_META:
+		if (capture_output) {
+			GString *out = NULL;
+			if (sr_output_send(capture_output, packet, &out) != SR_OK) {
+				capture_failed = TRUE;
+				g_idle_add(stream_stop_idle, NULL);
+			}
+			if (out)
+				g_string_free(out, TRUE);
+		}
 		break;
 	case SR_DF_LOGIC:
 		logic = packet->payload;
@@ -298,6 +401,15 @@ void stream_datafeed_in(const struct sr_dev_inst *sdi,
 			stream_frame_index++;
 		break;
 	case SR_DF_ANALOG:
+		if (capture_output && !capture_failed) {
+			GString *out = NULL;
+			if (sr_output_send(capture_output, packet, &out) != SR_OK) {
+				capture_failed = TRUE;
+				g_idle_add(stream_stop_idle, NULL);
+			}
+			if (out)
+				g_string_free(out, TRUE);
+		}
 		if (stream_stop_requested)
 			break;
 		stream_stop_requested = TRUE;
@@ -310,6 +422,7 @@ void stream_datafeed_in(const struct sr_dev_inst *sdi,
 			g_idle_add(stream_stop_idle, NULL);
 		break;
 	case SR_DF_END:
+		capture_finish(TRUE);
 		stream_session_end(stream_limit_reached ? "samples-reached" : "device");
 		break;
 	default:

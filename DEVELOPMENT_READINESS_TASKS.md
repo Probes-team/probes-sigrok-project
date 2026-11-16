@@ -25,14 +25,14 @@ firmware。
 
 ```text
 开发主机: Windows x86_64
-构建环境: C:\msys64 的 MSYS2 MINGW64
+构建环境: C:\msys64 的 MSYS2 UCRT64
 目标: x86_64-w64-mingw32
-编译器: MSYS2 mingw-w64-x86_64-gcc
-Python ABI: MSYS2 mingw-w64-x86_64-python 3.14
+编译器: MSYS2 mingw-w64-ucrt-x86_64-gcc
+Python ABI: MSYS2 mingw-w64-ucrt-x86_64-python 3.14
 产品入口: sigrok-cli.exe
 ```
 
-不支持 W64DevKit、MSYS2 UCRT64/CLANG64/MINGW32、系统 Python 或外部 Python。
+不支持 W64DevKit、MSYS2 CLANG64/MINGW64/MINGW32、系统 Python 或外部 Python。
 这是构建与 ABI 的单一路径约束，不是对 sigrok 运行功能的裁剪。
 
 ## 3. 对上一版计划的修正
@@ -43,7 +43,7 @@ Python ABI: MSYS2 mingw-w64-x86_64-python 3.14
 | `--disable-all-drivers --enable-demo` | 将 `demo` 烟测错误地变成唯一 driver | 使用上游默认 `--enable-all-drivers=check`；`demo` 仅参与测试 |
 | `firmware/` 保持空目录 | 已启用 driver 可能依赖官方 firmware | 导入完整 `sigrok-firmware` 基线并整体发布 |
 | 期望 driver 文件只含 `demo` | 会把其他已构建 driver 误判为不应存在 | 从构建摘要生成已构建 driver 清单，包验证与其精确比较 |
-| 不检测可用 driver 依赖 | 会因本机漏装依赖而静默失去本可支持的上游 driver | 安装并验证 MINGW64 仓库可提供的相关依赖；平台本身无实现的功能按上游 `check` 行为记录 |
+| 不检测可用 driver 依赖 | 会因本机漏装依赖而静默失去本可支持的上游 driver | 安装并验证 UCRT64 仓库可提供的相关依赖；平台本身无实现的功能按上游 `check` 行为记录 |
 | CLI 强制覆盖 decoder/firmware 目录变量 | 破坏上游的用户扩展搜索路径 | 在库中加入包目录作为默认搜索路径，保留既有环境变量优先级和扩展语义 |
 
 `--disable-bindings` 仍保留，但不属于上述问题：本发行包的契约是 `sigrok-cli.exe`
@@ -72,20 +72,20 @@ probes-sigrok/
 `-- package-manifest.json
 ```
 
-包内的 driver 集取决于上游 `configure` 在 MINGW64 上发现的依赖。脚本不得以
-`--disable-*` 主动排除 driver；因 Windows 平台或 MINGW64 仓库没有对应依赖而
+包内的 driver 集取决于上游 `configure` 在 UCRT64 上发现的依赖。脚本不得以
+`--disable-*` 主动排除 driver；因 Windows 平台或 UCRT64 仓库没有对应依赖而
 自然无法构建的 driver，必须在构建清单中明确记录原因。
 
 ## 5. 执行任务
 
 按 T01-T08 执行。期间不提交；只有 T08 通过后创建一个最终提交。
 
-### T01：固定 MSYS2 MINGW64 工具链和全部可用驱动依赖
+### T01：固定 MSYS2 UCRT64 工具链和全部可用驱动依赖
 
 **文件变更**
 
 - 新增 `config/toolchain.psd1`
-- 新增 `scripts/invoke-mingw64.ps1`
+- 新增 `scripts/invoke-ucrt64.ps1`
 - 修改 `scripts/requirements.ps1`
 - 修改 `README.md`
 
@@ -96,22 +96,22 @@ probes-sigrok/
    ```powershell
    @{
        MsysRoot = 'C:\msys64'
-       Environment = 'MINGW64'
+       Environment = 'UCRT64'
        Target = 'x86_64-w64-mingw32'
        PythonExecutable = 'python3.14'
        PythonPkgConfig = 'python-3.14-embed'
    }
    ```
 
-2. `scripts/invoke-mingw64.ps1` 是唯一外部命令入口。它只经
-   `<MsysRoot>\usr\bin\bash.exe` 在 `MSYSTEM=MINGW64` 环境执行命令，不读取
+2. `scripts/invoke-ucrt64.ps1` 是唯一外部命令入口。它只经
+   `<MsysRoot>\usr\bin\bash.exe` 在 `MSYSTEM=UCRT64` 环境执行命令，不读取
    调用它的 PowerShell PATH。
 3. `requirements.ps1` 验证 Autotools、GCC、pkgconf、GLib、GIO、zlib、libzip、
-   Python 3.14，以及 MINGW64 可提供的 driver 依赖：libusb、libserialport、
+   Python 3.14，以及 UCRT64 可提供的 driver 依赖：libusb、libserialport、
    libftdi、hidapi、nettle。
-4. 对 MINGW64 无实现的上游依赖，例如 BlueZ、librevisa、libgpib、libieee1284，
+4. 对 UCRT64 无实现的上游依赖，例如 BlueZ、librevisa、libgpib、libieee1284，
    输出“平台不可用”记录而不尝试引入另一套工具链或第三方兼容层。
-5. `README.md` 记录唯一工具链和“全部 MINGW64 可支持的上游功能”原则。
+5. `README.md` 记录唯一工具链和“全部 UCRT64 可支持的上游功能”原则。
 
 **验收**
 
@@ -167,7 +167,7 @@ probes-sigrok/
 - 修改 `config/release.psd1`
 - 新增 `scripts/lib/release-config.ps1`
 - 修改 `scripts/build.ps1`
-- 新增 `scripts/build-mingw64.sh`
+- 新增 `scripts/build-ucrt64.sh`
 - 修改 `README.md`
 
 **具体改造**
@@ -190,14 +190,14 @@ probes-sigrok/
 2. `build.ps1` 每次将当前 `src/` 复制到 `.work/autotools-src/`，并只在该副本中
    运行 `autoreconf`。受 Git 管理的 `src/` 不得出现生成的 `configure`、
    `aclocal.m4` 或 libtool 文件。
-3. `build-mingw64.sh` 固定构建顺序：
+3. `build-ucrt64.sh` 固定构建顺序：
 
    ```text
    libsigrok -> libsigrokdecode -> sigrok-cli
    ```
 
 4. `libsigrok` 使用上游 `--enable-all-drivers=check`，不传递
-   `--disable-all-drivers` 或任意单 driver `--enable-*` 参数；保留所有被 MINGW64
+   `--disable-all-drivers` 或任意单 driver `--enable-*` 参数；保留所有被 UCRT64
    依赖解析支持的上游 driver。
 5. `libsigrokdecode` 执行原有 `make install`，使全部 decoder 和 `common/` 模块
    进入 `.work/stage/`；不得增加 decoder 选择逻辑。
@@ -272,10 +272,10 @@ probes-sigrok/
    不存在 `decoder-allowlist.json`、裁剪脚本或手工依赖表。
 3. 整体复制 `src/sigrok-firmware/` 的有效 firmware 内容到顶层 `firmware/`，排除
    其 `.git/` 和发布无关元数据，但不按 driver 选择文件。
-4. `dll-closure.ps1` 使用 MINGW64 `objdump -p` 递归解析 CLI 和已复制 DLL，仅从
-   `.work/stage/`、`C:\msys64\mingw64\bin/` 与 Windows API DLL 白名单解析依赖。
+4. `dll-closure.ps1` 使用 UCRT64 `objdump -p` 递归解析 CLI 和已复制 DLL，仅从
+   `.work/stage/`、`C:\msys64\ucrt64\bin/` 与 Windows API DLL 白名单解析依赖。
    所有非系统依赖都必须复制到包顶层。
-5. `python-runtime.ps1` 从同一 MINGW64 前缀复制 `libpython3.14.dll` 到包顶层，
+5. `python-runtime.ps1` 从同一 UCRT64 前缀复制 `libpython3.14.dll` 到包顶层，
    并复制完整 `lib/python3.14/` 到 `<package-root>/python/lib/python3.14/`。
 6. `source-disclosure.ps1` 从 Git `HEAD` 导出四份完整源码：`libsigrok`、
    `libsigrokdecode`、`sigrok-cli`、`sigrok-firmware`，以及上游清单、许可证和

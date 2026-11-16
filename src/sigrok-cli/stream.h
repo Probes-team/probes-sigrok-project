@@ -17,6 +17,8 @@
 int stream_ensure_binary_stdout(void);
 void stream_set_session(struct sr_session *session);
 void stream_set_sample_limit(guint64 limit);
+gboolean stream_capture_succeeded(void);
+gboolean stream_capture_requested(void);
 void stream_datafeed_in(const struct sr_dev_inst *sdi,
 		const struct sr_datafeed_packet *packet, void *cb_data);
 int stream_control_attach(struct sr_session *session, gboolean stop_on_eof);

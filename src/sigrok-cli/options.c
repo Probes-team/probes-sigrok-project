@@ -237,6 +237,11 @@ int parse_options(int argc, char **argv)
 		g_critical("--stream cannot be combined with --show.");
 		goto done;
 	}
+	if (opt_stream && opt_output_format
+			&& strcmp(opt_output_format, "srzip") != 0) {
+		g_critical("Stream capture files use the native srzip output module.");
+		goto done;
+	}
 #ifdef HAVE_SRD
 	if (opt_stream && opt_pds) {
 		g_critical("--stream cannot be combined with protocol decoders.");

@@ -87,7 +87,12 @@ $forbidden = Get-ChildItem -LiteralPath $PackagePath -Recurse -File | Where-Obje
 }
 if ($forbidden) { throw "Runtime package contains development artifacts: $($forbidden.FullName -join ', ')" }
 
-$objdump = if ($ObjdumpPath) { $ObjdumpPath } else { Join-Path 'C:\msys64\mingw64\bin' 'objdump.exe' }
+$msysRoot = if ([string]::IsNullOrWhiteSpace($env:PROBES_SIGROK_MSYS_ROOT)) {
+    'C:\msys64'
+} else {
+    [IO.Path]::GetFullPath($env:PROBES_SIGROK_MSYS_ROOT)
+}
+$objdump = if ($ObjdumpPath) { $ObjdumpPath } else { Join-Path $msysRoot 'ucrt64/bin/objdump.exe' }
 if (Test-Path -LiteralPath $objdump) {
 	foreach ($driverFile in @($driverManifest.files | Where-Object { $_.peArchitecture -ne 'data' })) {
 		$driverPeFile = Join-Path $PackagePath ('driver-install/wch-ch375/x64/' + $driverFile.path.Replace('/', '\\'))

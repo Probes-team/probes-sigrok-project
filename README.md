@@ -159,6 +159,9 @@ Windows 工具链，但调用者只需使用以下命令：
 ./scripts/verify-package.ps1 -PackagePath ./dist/probes-sigrok-current
 ```
 
+MSYS2 UCRT64 默认安装于 `C:\msys64`。隔离构建可通过设置
+`PROBES_SIGROK_MSYS_ROOT` 指向本地 UCRT64 根目录，不需要修改全局 PATH。
+
 日常打包直接运行 `scripts/package.ps1`，默认使用版本名 `current`，以便构建产物、
 远程同步路径和缓存路径稳定。只有需要发布、归档或并行保留多个明确版本时，才
 显式传入其它 `-Version` 值；未传入时绝不要求调用者填写版本。

@@ -4,24 +4,24 @@ param()
 $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path -Parent $PSScriptRoot
 $toolchain = Import-PowerShellDataFile (Join-Path $projectRoot 'config/toolchain.psd1')
-$invoke = Join-Path $PSScriptRoot 'invoke-mingw64.ps1'
+$invoke = Join-Path $PSScriptRoot 'invoke-ucrt64.ps1'
 
 $requiredPackages = @(
     'autoconf',
     'automake',
     'libtool',
-    'mingw-w64-x86_64-gcc',
-    'mingw-w64-x86_64-pkgconf',
-    'mingw-w64-x86_64-glib2',
-    'mingw-w64-x86_64-zlib',
-    'mingw-w64-x86_64-libzip',
-    'mingw-w64-x86_64-python',
-    'mingw-w64-x86_64-libusb',
-    'mingw-w64-x86_64-libserialport',
-    'mingw-w64-x86_64-libftdi',
-    'mingw-w64-x86_64-hidapi',
-    'mingw-w64-x86_64-nettle',
-    'mingw-w64-x86_64-check'
+    'mingw-w64-ucrt-x86_64-gcc',
+    'mingw-w64-ucrt-x86_64-pkgconf',
+    'mingw-w64-ucrt-x86_64-glib2',
+    'mingw-w64-ucrt-x86_64-zlib',
+    'mingw-w64-ucrt-x86_64-libzip',
+    'mingw-w64-ucrt-x86_64-python',
+    'mingw-w64-ucrt-x86_64-libusb',
+    'mingw-w64-ucrt-x86_64-libserialport',
+    'mingw-w64-ucrt-x86_64-libftdi',
+    'mingw-w64-ucrt-x86_64-hidapi',
+    'mingw-w64-ucrt-x86_64-nettle',
+    'mingw-w64-ucrt-x86_64-check'
 )
 
 $checks = @(
@@ -43,5 +43,5 @@ foreach ($check in $checks) {
     & $invoke -Script $check
 }
 
-Write-Output "MINGW64 prerequisites found for $($toolchain.Target) with Python 3.14."
+Write-Output "UCRT64 prerequisites found for $($toolchain.Target) with Python 3.14."
 Write-Output 'Platform-unavailable upstream dependencies: bluez, librevisa, libgpib, libieee1284.'

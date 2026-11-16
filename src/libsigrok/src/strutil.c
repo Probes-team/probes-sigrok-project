@@ -560,7 +560,7 @@ SR_API int sr_vsprintf_ascii(char *buf, const char *format, va_list args)
 #if defined(_WIN32)
 	int ret;
 
-#if 0
+#if 1
 	/*
 	 * TODO: This part compiles with mingw-w64 but doesn't run with Win7.
 	 *       Doesn't start because of "Procedure entry point _create_locale
@@ -571,12 +571,11 @@ SR_API int sr_vsprintf_ascii(char *buf, const char *format, va_list args)
 	_locale_t locale;
 
 	locale = _create_locale(LC_NUMERIC, "C");
+	if (!locale)
+		return -1;
 	ret = _vsprintf_l(buf, format, locale, args);
 	_free_locale(locale);
 #endif
-
-	/* vsprintf() uses the current locale, may not work correctly for floats. */
-	ret = vsprintf(buf, format, args);
 
 	return ret;
 #elif defined(__APPLE__)
@@ -733,7 +732,7 @@ SR_API int sr_vsnprintf_ascii(char *buf, size_t buf_size,
 #if defined(_WIN32)
 	int ret;
 
-#if 0
+#if 1
 	/*
 	 * TODO: This part compiles with mingw-w64 but doesn't run with Win7.
 	 *       Doesn't start because of "Procedure entry point _create_locale
@@ -744,12 +743,11 @@ SR_API int sr_vsnprintf_ascii(char *buf, size_t buf_size,
 	_locale_t locale;
 
 	locale = _create_locale(LC_NUMERIC, "C");
+	if (!locale)
+		return -1;
 	ret = _vsnprintf_l(buf, buf_size, format, locale, args);
 	_free_locale(locale);
 #endif
-
-	/* vsprintf uses the current locale, may cause issues for floats. */
-	ret = vsnprintf(buf, buf_size, format, args);
 
 	return ret;
 #elif defined(__APPLE__)

@@ -95,9 +95,9 @@ Copy-DirectoryContents -Source $decoderRoot -Destination (Join-Path $packageRoot
 Copy-DirectoryContents -Source $firmwareRoot -Destination (Join-Path $packageRoot 'firmware')
 Copy-EmbeddedPythonRuntime -PackageRoot $packageRoot -Toolchain $toolchain
 
-$mingwBin = Join-Path $toolchain.MsysRoot 'mingw64/bin'
-$objdump = Join-Path $mingwBin 'objdump.exe'
-$dllClosure = Resolve-DllClosure -PackageRoot $packageRoot -StageBin $stageBin -MsysBin $mingwBin -ObjdumpPath $objdump
+$ucrtBin = Join-Path $toolchain.MsysRoot 'ucrt64/bin'
+$objdump = Join-Path $ucrtBin 'objdump.exe'
+$dllClosure = Resolve-DllClosure -PackageRoot $packageRoot -StageBin $stageBin -MsysBin $ucrtBin -ObjdumpPath $objdump
 
 New-SourceDisclosure -ProjectRoot $projectRoot -PackageRoot $packageRoot
 Copy-PackageLicenses -ProjectRoot $projectRoot -PackageRoot $packageRoot -Toolchain $toolchain
