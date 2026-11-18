@@ -23,11 +23,13 @@ int artifact_context_begin(enum artifact_output_mode mode,
 		struct artifact_context **ctx);
 void artifact_context_abort(struct artifact_context *ctx);
 int artifact_context_finish(struct artifact_context *ctx, gboolean success);
+int artifact_context_finish_silent(struct artifact_context *ctx, gboolean success);
 
 struct artifact_context *artifact_context_current(void);
 gboolean artifact_is_file_mode(void);
 const char *artifact_operation_dir(const struct artifact_context *ctx);
 const char *artifact_capture_path(const struct artifact_context *ctx);
+const char *artifact_capture_final_path(const struct artifact_context *ctx);
 
 FILE *artifact_decoder_text_stream(struct artifact_context *ctx);
 FILE *artifact_decoder_binary_stream(struct artifact_context *ctx);

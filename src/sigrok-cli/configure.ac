@@ -89,7 +89,7 @@ AC_SYS_LARGEFILE
 # Retrieve the compile and link flags for all modules combined.
 # Also, bail out at this point if any module dependency is not met.
 PKG_CHECK_MODULES([SIGROK_CLI],
-	[glib-2.0 >= 2.32.0 libsigrok >= 0.5.0 $SC_PKGLIBS])
+	[glib-2.0 >= 2.32.0 gio-2.0 >= 2.32.0 libsigrok >= 0.5.0 $SC_PKGLIBS])
 
 # Check for version dependent availability of functions.
 srd_save_cflags=$CFLAGS

@@ -67,7 +67,7 @@ x86_64-w64-mingw32-gcc -O2 -municode -Wall -Wextra -Werror \
     -ladvapi32 -o "$helper_exe"
 
 runtime_supported="$work_root/runtime-supported.txt"
-(PATH="$stage_root$prefix/bin:/mingw64/bin:/usr/bin" "$stage_root$prefix/bin/sigrok-cli.exe" --list-supported || true) >"$runtime_supported" 2>&1
+(PATH="$stage_root$prefix/bin:/ucrt64/bin:/usr/bin" "$stage_root$prefix/bin/sigrok-cli.exe" --list-supported || true) >"$runtime_supported" 2>&1
 
 python3.14 - "$work_root/build-manifest.json" "$project_commit" "$target" "$configuration" "$stage_root" "$source_root/libsigrok/configure.ac" "$build_root/libsigrok/config.log" "$runtime_supported" "$source_root/sigrok-firmware" "$build_root/libsigrok/check.log" "$build_root/libsigrokdecode/check.log" <<'PY'
 import json

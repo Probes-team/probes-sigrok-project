@@ -4,11 +4,11 @@ function Copy-EmbeddedPythonRuntime {
         [Parameter(Mandatory)][hashtable]$Toolchain
     )
 
-    $mingwRoot = Join-Path $Toolchain.MsysRoot 'mingw64'
-    $pythonDll = Join-Path $mingwRoot 'bin/libpython3.14.dll'
-    $stdlib = Join-Path $mingwRoot 'lib/python3.14'
+    $ucrtRoot = Join-Path $Toolchain.MsysRoot 'ucrt64'
+    $pythonDll = Join-Path $ucrtRoot 'bin/libpython3.14.dll'
+    $stdlib = Join-Path $ucrtRoot 'lib/python3.14'
     if (-not (Test-Path -LiteralPath $pythonDll) -or -not (Test-Path -LiteralPath $stdlib)) {
-        throw 'The fixed MINGW64 Python 3.14 runtime is incomplete.'
+        throw 'The fixed UCRT64 Python 3.14 runtime is incomplete.'
     }
 
     Copy-Item -LiteralPath $pythonDll -Destination (Join-Path $PackageRoot 'libpython3.14.dll')

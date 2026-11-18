@@ -102,22 +102,21 @@ static const struct dslogic_channel_mode modes_u3_32_super[] = {
 	MODE("buffer-1000x8", 8, SR_MHZ(1), SR_GHZ(1), SR_KHZ(10), SR_MHZ(500), 5, FALSE),
 };
 
-#define PROFILE_OPERATIONS(caps_) (DSLOGIC_OPERATION_MASK(DSLOGIC_OPERATION_STREAM) | \
-	DSLOGIC_OPERATION_MASK(DSLOGIC_OPERATION_INTERNAL_TEST) | \
-	((caps_) & DSLOGIC_CAP_BUFFER ? DSLOGIC_OPERATION_MASK(DSLOGIC_OPERATION_BUFFER) : 0))
-#define PROFILE_DEFAULT_OPERATION(caps_) ((caps_) & DSLOGIC_CAP_BUFFER ? \
-	DSLOGIC_OPERATION_BUFFER : DSLOGIC_OPERATION_STREAM)
-#define PROFILE(vid_, pid_, speed_, model_, fw_, fpga3_, fpga5_, depth_, channels_, caps_, modes_, default_) \
+#define PROFILE_DEFINE(vid_, pid_, speed_, model_, fw_, fpga3_, fpga5_, depth_, channels_, caps_, modes_, default_, adf4360_) \
 	{ vid_, pid_, speed_, "DreamSourceLab", model_, NULL, fw_, fpga3_, fpga5_, \
 		depth_, channels_, caps_, modes_, G_N_ELEMENTS(modes_), default_, 0, \
-		PROFILE_OPERATIONS(caps_), PROFILE_DEFAULT_OPERATION(caps_), default_, FALSE, 0, 0 }
+		adf4360_, 0, 0 }
+#define PROFILE(vid_, pid_, speed_, model_, fw_, fpga3_, fpga5_, depth_, channels_, caps_, modes_, default_) \
+	PROFILE_DEFINE(vid_, pid_, speed_, model_, fw_, fpga3_, fpga5_, depth_, channels_, caps_, modes_, default_, FALSE)
+#define PROFILE_ADF4360(vid_, pid_, speed_, model_, fw_, fpga3_, fpga5_, depth_, channels_, caps_, modes_, default_) \
+	PROFILE_DEFINE(vid_, pid_, speed_, model_, fw_, fpga3_, fpga5_, depth_, channels_, caps_, modes_, default_, TRUE)
 #define PROFILE_U2PRO16 \
 	{ 0x2a0e, 0x002d, LIBUSB_SPEED_HIGH, "DreamSourceLab", "DSLogic U2Pro16", NULL, \
 		NULL, DSLOGIC_FIRMWARE("DSLogicU2Pro16.bin"), DSLOGIC_FIRMWARE("DSLogicU2Pro16.bin"), \
 		DSLOGIC_GIB(4), 16, DSLOGIC_CAP_BUFFER | DSLOGIC_CAP_VOLTAGE_THRESHOLD | \
 		DSLOGIC_CAP_SECURITY | DSLOGIC_CAP_RLE | DSLOGIC_CAP_FILTER, \
 		modes_u2pro16_high, G_N_ELEMENTS(modes_u2pro16_high), 4, 0x3f, \
-		PROFILE_OPERATIONS(DSLOGIC_CAP_BUFFER), DSLOGIC_OPERATION_BUFFER, 4, TRUE, SR_MHZ(500), SR_GHZ(1) }
+		TRUE, SR_MHZ(500), SR_GHZ(1) }
 
 static const struct dslogic_profile profiles[] = {
 	PROFILE(0x2a0e, 0x0001, LIBUSB_SPEED_HIGH, "DSLogic",
@@ -140,23 +139,23 @@ static const struct dslogic_profile profiles[] = {
 		NULL, DSLOGIC_FIRMWARE("DSLogicU2Basic.bin"), DSLOGIC_FIRMWARE("DSLogicU2Basic.bin"), DSLOGIC_MIB(64), 16,
 		DSLOGIC_CAP_BUFFER | DSLOGIC_CAP_VOLTAGE_THRESHOLD | DSLOGIC_CAP_RLE |
 		DSLOGIC_CAP_FILTER, modes_u2basic, 4),
-	PROFILE(0x2a0e, 0x002a, LIBUSB_SPEED_HIGH, "DSLogic U3Pro16",
+	PROFILE_ADF4360(0x2a0e, 0x002a, LIBUSB_SPEED_HIGH, "DSLogic U3Pro16",
 		NULL, DSLOGIC_FIRMWARE("DSLogicU3Pro16.bin"), DSLOGIC_FIRMWARE("DSLogicU3Pro16.bin"), DSLOGIC_GIB(2), 16,
 		DSLOGIC_CAP_BUFFER | DSLOGIC_CAP_VOLTAGE_THRESHOLD |
 		DSLOGIC_CAP_RLE | DSLOGIC_CAP_FILTER,
 		modes_u3_16_high, 4),
-	PROFILE(0x2a0e, 0x002a, LIBUSB_SPEED_SUPER, "DSLogic U3Pro16",
+	PROFILE_ADF4360(0x2a0e, 0x002a, LIBUSB_SPEED_SUPER, "DSLogic U3Pro16",
 		NULL, DSLOGIC_FIRMWARE("DSLogicU3Pro16.bin"), DSLOGIC_FIRMWARE("DSLogicU3Pro16.bin"), DSLOGIC_GIB(2), 16,
 		DSLOGIC_CAP_BUFFER | DSLOGIC_CAP_VOLTAGE_THRESHOLD |
 		DSLOGIC_CAP_RLE | DSLOGIC_CAP_FILTER,
 		modes_u3_16_super, 4),
-	PROFILE(0x2a0e, 0x002c, LIBUSB_SPEED_HIGH, "DSLogic U3Pro32",
+	PROFILE_ADF4360(0x2a0e, 0x002c, LIBUSB_SPEED_HIGH, "DSLogic U3Pro32",
 		NULL, DSLOGIC_FIRMWARE("DSLogicU3Pro32.bin"), DSLOGIC_FIRMWARE("DSLogicU3Pro32.bin"), DSLOGIC_GIB(2), 32,
 		DSLOGIC_CAP_BUFFER | DSLOGIC_CAP_VOLTAGE_THRESHOLD |
 		DSLOGIC_CAP_32_CHANNELS | DSLOGIC_CAP_RLE |
 		DSLOGIC_CAP_FILTER,
 		modes_u3_32_high, 5),
-	PROFILE(0x2a0e, 0x002c, LIBUSB_SPEED_SUPER, "DSLogic U3Pro32",
+	PROFILE_ADF4360(0x2a0e, 0x002c, LIBUSB_SPEED_SUPER, "DSLogic U3Pro32",
 		NULL, DSLOGIC_FIRMWARE("DSLogicU3Pro32.bin"), DSLOGIC_FIRMWARE("DSLogicU3Pro32.bin"), DSLOGIC_GIB(2), 32,
 		DSLOGIC_CAP_BUFFER | DSLOGIC_CAP_VOLTAGE_THRESHOLD |
 		DSLOGIC_CAP_32_CHANNELS | DSLOGIC_CAP_RLE |
@@ -208,44 +207,25 @@ const struct dslogic_channel_mode *dslogic_profile_mode_at(
 	return &profile->modes[index];
 }
 
-gboolean dslogic_profile_operation_supported(
-		const struct dslogic_profile *profile,
-		enum dslogic_operation_mode operation_mode)
+gboolean dslogic_profile_stream_supported(
+		const struct dslogic_profile *profile, gboolean stream)
 {
-	if (!profile || operation_mode <= DSLOGIC_OPERATION_UNSET ||
-			operation_mode > DSLOGIC_OPERATION_INTERNAL_TEST)
+	if (!profile)
 		return FALSE;
 
-	return profile->operation_modes & DSLOGIC_OPERATION_MASK(operation_mode);
-}
-
-gboolean dslogic_profile_operation_is_stream(
-		const struct dslogic_profile *profile,
-		enum dslogic_operation_mode operation_mode)
-{
-	if (!dslogic_profile_operation_supported(profile, operation_mode))
-		return FALSE;
-
-	if (operation_mode == DSLOGIC_OPERATION_STREAM)
+	if (stream)
 		return TRUE;
-	if (operation_mode == DSLOGIC_OPERATION_INTERNAL_TEST)
-		return !(profile->capabilities & DSLOGIC_CAP_BUFFER);
 
-	return FALSE;
+	return (profile->capabilities & DSLOGIC_CAP_BUFFER) != 0;
 }
 
-const struct dslogic_channel_mode *dslogic_profile_mode_for_operation(
-		const struct dslogic_profile *profile,
-		enum dslogic_operation_mode operation_mode)
+const struct dslogic_channel_mode *dslogic_profile_mode_for_stream(
+		const struct dslogic_profile *profile, gboolean stream)
 {
-	const gboolean stream = dslogic_profile_operation_is_stream(profile,
-		operation_mode);
 	size_t index;
 
-	if (!dslogic_profile_operation_supported(profile, operation_mode))
+	if (!dslogic_profile_stream_supported(profile, stream))
 		return NULL;
-	if (operation_mode == DSLOGIC_OPERATION_INTERNAL_TEST)
-		return dslogic_profile_mode_at(profile, profile->internal_test_mode);
 
 	for (index = 0; index < profile->mode_count; index++) {
 		if (profile->modes[index].stream == stream)
@@ -272,7 +252,7 @@ const char *dslogic_profile_fx2_firmware(
 }
 
 
-const struct dslogic_channel_mode *dslogic_profile_select_mode_for_operation(
+const struct dslogic_channel_mode *dslogic_profile_select_mode_for_stream(
 		const struct dslogic_profile *profile, unsigned int enabled_channels,
 		uint64_t samplerate, gboolean stream)
 {
@@ -309,16 +289,16 @@ const struct dslogic_channel_mode *dslogic_profile_select_mode(
 {
 	const struct dslogic_channel_mode *mode;
 
-	mode = dslogic_profile_select_mode_for_operation(profile, enabled_channels,
+	mode = dslogic_profile_select_mode_for_stream(profile, enabled_channels,
 		samplerate, FALSE);
 	if (mode)
 		return mode;
 
-	return dslogic_profile_select_mode_for_operation(profile, enabled_channels,
+	return dslogic_profile_select_mode_for_stream(profile, enabled_channels,
 		samplerate, TRUE);
 }
 
-GArray *dslogic_profile_samplerates_for_operation(
+GArray *dslogic_profile_samplerates_for_stream(
 		const struct dslogic_profile *profile, unsigned int enabled_channels,
 		gboolean stream)
 {
@@ -331,7 +311,7 @@ GArray *dslogic_profile_samplerates_for_operation(
 	for (index = 0; index < G_N_ELEMENTS(dsview_logic_samplerates); index++) {
 		const uint64_t samplerate = dsview_logic_samplerates[index];
 
-		if (!dslogic_profile_select_mode_for_operation(profile,
+		if (!dslogic_profile_select_mode_for_stream(profile,
 				enabled_channels, samplerate, stream))
 			continue;
 		g_array_append_val(samplerates, samplerate);
@@ -348,7 +328,7 @@ gboolean dslogic_profile_samplerate_is_available(
 	gboolean available = FALSE;
 	guint index;
 
-	samplerates = dslogic_profile_samplerates_for_operation(profile,
+	samplerates = dslogic_profile_samplerates_for_stream(profile,
 		enabled_channels, stream);
 	if (!samplerates)
 		return FALSE;

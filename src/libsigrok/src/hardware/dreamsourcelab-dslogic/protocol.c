@@ -61,6 +61,8 @@ enum dslogic_ctl_destination {
 #define DSLOGIC_ADDR_VTH			0x78
 #define DSLOGIC_ADDR_CONTROL0		0x70
 #define DSLOGIC_ADDR_HDL_VERSION	0x04
+#define DSLOGIC_ADDR_ADC_CLK		0x48
+#define DSLOGIC_ADDR_ADC_CLK_POWER	(DSLOGIC_ADDR_ADC_CLK + 2)
 #define DSLOGIC_ADDR_SEC_CONTROL	0x73
 #define DSLOGIC_ADDR_SEC_DATA		0x75
 #define DSLOGIC_HDL_VERSION			0x0e
@@ -72,6 +74,7 @@ enum dslogic_ctl_destination {
 #define DSLOGIC_SECURITY_START		0x0513
 #define DSLOGIC_SECURITY_CHECK		0x0219
 #define DSLOGIC_SECURITY_RETRIES		8
+#define DSLOGIC_TRANSFER_DRAIN_TIMEOUT_MS	1000
 
 #define DS_MAX_TRIG_PERCENT		90
 
@@ -83,7 +86,17 @@ enum dslogic_ctl_destination {
 #define DS_MODE_QUAR_MODE		(1 << 6)
 #define DS_MODE_FILTER			(1 << 8)
 #define DS_MODE_STREAM_MODE		(1 << 12)
+
+/*
+ * Windows libusb backends do not expose pollable descriptors. The USB source
+ * therefore has to call libusb_handle_events_timeout() periodically even while
+ * a bulk transfer is in flight. Do not reuse the transfer timeout here: with a
+ * stream transfer that is about 137 ms, which batches many completed transfers
+ * into one visible waveform update.
+ */
+#define DSLOGIC_STREAM_EVENT_POLL_MS	10
 #define DS_MODE_INT_TEST		(1 << 15)
+#define DS_MODE_SLOW_ACQ		(1 << 10)
 
 #define DSLOGIC_ATOMIC_SAMPLES		(sizeof(uint64_t) * 8)
 #define DSLOGIC_ATOMIC_BYTES		sizeof(uint64_t)
@@ -658,6 +671,72 @@ SR_PRIV int dslogic_recover_device_state(const struct sr_dev_inst *sdi)
 		NULL);
 }
 
+struct dslogic_adc_clock_write {
+	uint8_t offset;
+	uint8_t length;
+	unsigned int delay_ms;
+	uint8_t data[4];
+};
+
+/*
+ * DSView programs the ADF4360 PLL during dev_open. Unlike FPGA
+ * configuration, this state survives DSView exiting and is only cleared by a
+ * device power cycle, so a cold-starting frontend must initialize it itself.
+ */
+static const struct dslogic_adc_clock_write dslogic_adf4360_500m_clock[] = {
+	{ DSLOGIC_ADDR_ADC_CLK_POWER, 1, 0, { 0x01 } },
+	{ DSLOGIC_ADDR_ADC_CLK, 4, 0, { 0x01, 0x61, 0x00, 0x30 } },
+	{ DSLOGIC_ADDR_ADC_CLK, 4, 0, { 0x01, 0x40, 0xf1, 0x46 } },
+	{ DSLOGIC_ADDR_ADC_CLK, 4, 10, { 0x01, 0x62, 0x3d, 0x40 } },
+};
+
+SR_PRIV int dslogic_init_adf4360_clock_with_ops(const struct sr_dev_inst *sdi,
+		const struct dslogic_fpga_upload_ops *ops, void *ops_data)
+{
+	const struct dev_context *devc;
+	const struct sr_usb_dev_inst *usb;
+	unsigned int byte_index;
+	unsigned int index;
+	int ret;
+
+	if (!sdi || !sdi->priv || !sdi->conn || !ops || !ops->control_write)
+		return SR_ERR_ARG;
+	devc = sdi->priv;
+	usb = sdi->conn;
+	if (!usb->devhdl)
+		return SR_ERR_ARG;
+	if (!devc->profile || !devc->profile->adf4360)
+		return SR_OK;
+
+	for (index = 0; index < G_N_ELEMENTS(dslogic_adf4360_500m_clock);
+			index++) {
+		const struct dslogic_adc_clock_write *const write =
+			&dslogic_adf4360_500m_clock[index];
+
+		if (write->delay_ms)
+			g_usleep(write->delay_ms * 1000);
+		/* DSView writes each register byte in a separate control command. */
+		for (byte_index = 0; byte_index < write->length; byte_index++) {
+			ret = ops->control_write(ops_data, usb->devhdl,
+				DSLOGIC_CTL_I2C_REG, write->offset,
+				&write->data[byte_index], 1);
+			if (ret != SR_OK) {
+				sr_err("Failed to initialize DSLogic ADF4360 clock at register 0x%02x.",
+					write->offset);
+				return ret;
+			}
+		}
+	}
+
+	return SR_OK;
+}
+
+SR_PRIV int dslogic_init_adf4360_clock(const struct sr_dev_inst *sdi)
+{
+	return dslogic_init_adf4360_clock_with_ops(sdi, &default_fpga_upload_ops,
+		NULL);
+}
+
 SR_PRIV int dslogic_select_and_upload_fpga_with_ops(
 		const struct sr_dev_inst *sdi,
 		const struct dslogic_fpga_upload_ops *ops, void *ops_data)
@@ -1086,8 +1165,7 @@ static bool set_trigger(const struct sr_dev_inst *sdi, struct fpga_config *cfg,
 	if (trigger_point < DSLOGIC_ATOMIC_SAMPLES)
 		trigger_point = DSLOGIC_ATOMIC_SAMPLES;
 	mem_depth = devc->profile->mem_depth;
-	max_trigger_point = dslogic_profile_operation_is_stream(devc->profile,
-			devc->operation_mode) ? ((mem_depth * 10) / 100) :
+	max_trigger_point = devc->stream ? ((mem_depth * 10) / 100) :
 		((mem_depth * DS_MAX_TRIG_PERCENT) / 100);
 	if (trigger_point > max_trigger_point)
 		trigger_point = max_trigger_point;
@@ -1167,8 +1245,6 @@ SR_PRIV int dslogic_build_fpga_config(const struct sr_dev_inst *sdi,
 	if (set_trigger(sdi, cfg, (devc->profile->capabilities &
 			DSLOGIC_CAP_32_CHANNELS) ? cfg32 : NULL))
 		mode |= DS_MODE_TRIG_EN;
-	if (devc->operation_mode == DSLOGIC_OPERATION_INTERNAL_TEST)
-		mode |= DS_MODE_INT_TEST;
 	if (devc->profile->half_samplerate &&
 			devc->cur_samplerate == devc->profile->half_samplerate)
 		mode |= DS_MODE_HALF_MODE;
@@ -1178,8 +1254,7 @@ SR_PRIV int dslogic_build_fpga_config(const struct sr_dev_inst *sdi,
 	transform_trigger_words(cfg, (devc->profile->capabilities &
 			DSLOGIC_CAP_32_CHANNELS) ? cfg32 : NULL, devc->profile->adf4360,
 		mode & DS_MODE_HALF_MODE, mode & DS_MODE_QUAR_MODE);
-	if (dslogic_profile_operation_is_stream(devc->profile,
-			devc->operation_mode))
+	if (devc->stream)
 		mode |= DS_MODE_STREAM_MODE;
 	if (devc->external_clock) {
 		mode |= DS_MODE_CLK_TYPE;
@@ -1190,6 +1265,20 @@ SR_PRIV int dslogic_build_fpga_config(const struct sr_dev_inst *sdi,
 		mode |= DS_MODE_RLE_MODE;
 	if (devc->filter_mode)
 		mode |= DS_MODE_FILTER;
+
+	/*
+	 * DSView mirrors the FPGA "slow acquisition" bit when the logic byte
+	 * rate is below 1 KB/ms. Not setting it can make the FPGA fail to pace
+	 * the capture correctly at low rates.
+	 */
+	{
+		const unsigned int slow_channels = enabled_channel_count(sdi);
+		const double bytes_per_ms = ceil(devc->cur_samplerate / 1000.0 *
+			slow_channels / 8.0);
+
+		if (slow_channels && bytes_per_ms < 1024.0)
+			mode |= DS_MODE_SLOW_ACQ;
+	}
 
 	WL16(&cfg->mode, mode);
 	hw_max_samplerate = devc->selected_mode->hw_max_samplerate ?
@@ -1522,7 +1611,7 @@ SR_PRIV struct dev_context *dslogic_dev_new(void)
 	devc->capture_ratio = 0;
 	devc->rle_mode = FALSE;
 	devc->filter_mode = FALSE;
-	devc->operation_mode = DSLOGIC_OPERATION_UNSET;
+	devc->stream = FALSE;
 	devc->selected_mode = NULL;
 	devc->clock_edge = DS_EDGE_RISING;
 	devc->fpga_state = DSLOGIC_FPGA_UNKNOWN;
@@ -1583,8 +1672,7 @@ SR_PRIV gboolean dslogic_trigger_header_starts_data(
 {
 	if (!devc || !devc->profile)
 		return FALSE;
-	if (dslogic_profile_operation_is_stream(devc->profile,
-			devc->operation_mode))
+	if (devc->stream)
 		return TRUE;
 
 	/* Mirrors DSView receive_header() for buffered logic captures. */
@@ -1858,8 +1946,7 @@ static int receive_data(int fd, int revents, void *cb_data)
 	/* DSView polls HW_STATUS after 16 quiet event-loop turns in stream mode.
 	 * Sigrok has no SR_DF_OVERFLOW packet, so retain the hardware fact in the
 	 * standard error/end path rather than introducing a private packet type. */
-	if (dslogic_profile_operation_is_stream(devc->profile,
-			devc->operation_mode) && devc->empty_poll_count > 16) {
+	if (devc->stream && devc->empty_poll_count > 16) {
 		if (dslogic_control_read(usb->devhdl, DSLOGIC_CTL_HW_STATUS, 0,
 				&hw_status, sizeof(hw_status)) == SR_OK &&
 				dslogic_hw_status_has_overflow(hw_status)) {
@@ -1878,8 +1965,7 @@ static size_t to_bytes_per_ms(const struct sr_dev_inst *sdi)
 	const struct dev_context *const devc = sdi->priv;
 	const size_t ch_count = enabled_channel_count(sdi);
 
-	if (dslogic_profile_operation_is_stream(devc->profile,
-			devc->operation_mode))
+	if (devc->stream)
 		return (devc->cur_samplerate * ch_count) / (1000 * 8);
 
 
@@ -1945,17 +2031,36 @@ static void release_unsubmitted_transfers(struct dev_context *devc)
 }
 
 /* Failure before event-source registration must synchronously drain cancels. */
-static void cancel_and_drain_transfers(struct sr_dev_inst *sdi)
+static int cancel_and_drain_transfers(struct sr_dev_inst *sdi)
 {
 	struct dev_context *const devc = sdi->priv;
-	struct timeval tv = { 0, 0 };
-	unsigned int attempt;
+	gint64 deadline;
+	int ret;
+
+	if (devc->event_source_registered) {
+		usb_source_remove(sdi->session, devc->ctx);
+		devc->event_source_registered = FALSE;
+	}
 
 	abort_acquisition(devc);
-	for (attempt = 0; devc->submitted_transfers && attempt < 100; attempt++)
-		libusb_handle_events_timeout(devc->ctx->libusb_ctx, &tv);
+	deadline = g_get_monotonic_time() +
+		DSLOGIC_TRANSFER_DRAIN_TIMEOUT_MS * 1000;
+	while (devc->submitted_transfers &&
+			g_get_monotonic_time() < deadline) {
+		struct timeval tv = { 0, 10 * 1000 };
+
+		ret = libusb_handle_events_timeout(devc->ctx->libusb_ctx, &tv);
+		if (ret < 0 && ret != LIBUSB_ERROR_INTERRUPTED) {
+			sr_err("DSLogic USB event drain failed: %s.",
+				libusb_error_name(ret));
+			break;
+		}
+	}
 	if (devc->submitted_transfers)
 		sr_err("Failed to drain cancelled DSLogic USB transfers.");
+	if (devc->submitted_transfers)
+		return SR_ERR_TIMEOUT;
+	return SR_OK;
 }
 
 static void LIBUSB_CALL trigger_receive(struct libusb_transfer *transfer);
@@ -2096,8 +2201,7 @@ static void LIBUSB_CALL trigger_receive(struct libusb_transfer *transfer)
 				free_transfer(transfer);
 				return;
 			}
-			if (!dslogic_profile_operation_is_stream(devc->profile,
-					devc->operation_mode))
+			if (!devc->stream)
 				devc->actual_limit_samples =
 					(devc->actual_limit_samples - remain_count) &
 					~(DSLOGIC_ATOMIC_SAMPLES - 1);
@@ -2187,11 +2291,11 @@ static void default_start_remove_event_source(void *data,
 	usb_source_remove(sdi->session, devc->ctx);
 }
 
-static void default_start_cancel_and_drain(void *data,
+static int default_start_cancel_and_drain(void *data,
 		const struct sr_dev_inst *sdi)
 {
 	(void)data;
-	cancel_and_drain_transfers((struct sr_dev_inst *)sdi);
+	return cancel_and_drain_transfers((struct sr_dev_inst *)sdi);
 }
 
 static int default_start_recover(void *data, const struct sr_dev_inst *sdi)
@@ -2238,6 +2342,7 @@ SR_PRIV int dslogic_acquisition_start_with_ops(const struct sr_dev_inst *sdi,
 		const struct dslogic_acquisition_start_ops *ops, void *ops_data)
 {
 	unsigned int timeout;
+	unsigned int event_timeout;
 	const unsigned int channel_count = enabled_channel_count(sdi);
 
 	struct dev_context *devc;
@@ -2256,8 +2361,7 @@ SR_PRIV int dslogic_acquisition_start_with_ops(const struct sr_dev_inst *sdi,
 	if (!devc->profile || !sdi->conn || !channel_count ||
 			channel_count > devc->profile->logic_channel_count ||
 			!devc->cur_samplerate ||
-			!dslogic_profile_operation_supported(devc->profile,
-				devc->operation_mode))
+			!dslogic_profile_stream_supported(devc->profile, devc->stream))
 		return SR_ERR_ARG;
 	devc->ctx = ((struct drv_context *)sdi->driver->context)->sr_ctx;
 	devc->sent_samples = 0;
@@ -2276,19 +2380,12 @@ SR_PRIV int dslogic_acquisition_start_with_ops(const struct sr_dev_inst *sdi,
 	devc->actual_limit_samples = devc->limit_samples ?
 		(devc->limit_samples + DSLOGIC_ATOMIC_SAMPLES - 1) &
 		~(DSLOGIC_ATOMIC_SAMPLES - 1) : 0;
-	if (devc->operation_mode == DSLOGIC_OPERATION_INTERNAL_TEST)
-		devc->selected_mode = dslogic_profile_mode_for_operation(devc->profile,
-			devc->operation_mode);
-	else
-		devc->selected_mode = dslogic_profile_select_mode_for_operation(
-			devc->profile, channel_count, devc->cur_samplerate,
-			dslogic_profile_operation_is_stream(devc->profile,
-				devc->operation_mode));
+	devc->selected_mode = dslogic_profile_select_mode_for_stream(
+		devc->profile, channel_count, devc->cur_samplerate, devc->stream);
 	if (!devc->selected_mode) {
 		sr_err("No DSLogic channel mode supports %u channels at samplerate %" PRIu64
 			" in %s mode.", channel_count, devc->cur_samplerate,
-		dslogic_profile_operation_is_stream(devc->profile,
-			devc->operation_mode) ? "stream" : "buffer");
+		devc->stream ? "stream" : "buffer");
 		return SR_ERR_ARG;
 	}
 	if (devc->fpga_needs_upload &&
@@ -2300,6 +2397,7 @@ SR_PRIV int dslogic_acquisition_start_with_ops(const struct sr_dev_inst *sdi,
 		return ret;
 	devc->threshold_needs_apply = FALSE;
 	timeout = get_timeout(sdi);
+	event_timeout = devc->stream ? DSLOGIC_STREAM_EVENT_POLL_MS : timeout;
 
 	if ((ret = ops->configure_fpga(ops_data, sdi)) != SR_OK)
 		return ret;
@@ -2307,7 +2405,7 @@ SR_PRIV int dslogic_acquisition_start_with_ops(const struct sr_dev_inst *sdi,
 	if ((ret = ops->start_transfers(ops_data, sdi)) != SR_OK)
 		return acquisition_start_failure_cleanup(sdi, ops, ops_data, ret);
 
-	if ((ret = ops->add_event_source(ops_data, sdi, timeout)) != SR_OK)
+	if ((ret = ops->add_event_source(ops_data, sdi, event_timeout)) != SR_OK)
 		return acquisition_start_failure_cleanup(sdi, ops, ops_data, ret);
 	devc->event_source_registered = TRUE;
 
@@ -2327,11 +2425,11 @@ SR_PRIV int dslogic_acquisition_start(const struct sr_dev_inst *sdi)
 		&default_acquisition_start_ops, NULL);
 }
 
-static void default_stop_cancel_and_drain(void *data,
+static int default_stop_cancel_and_drain(void *data,
 		const struct sr_dev_inst *sdi)
 {
 	(void)data;
-	cancel_and_drain_transfers((struct sr_dev_inst *)sdi);
+	return cancel_and_drain_transfers((struct sr_dev_inst *)sdi);
 }
 
 static const struct dslogic_acquisition_stop_ops default_acquisition_stop_ops = {
@@ -2343,6 +2441,7 @@ SR_PRIV int dslogic_acquisition_stop_with_ops(const struct sr_dev_inst *sdi,
 		const struct dslogic_acquisition_stop_ops *ops, void *ops_data)
 {
 	struct dev_context *devc;
+	int drain_error;
 	int ret;
 
 	if (!sdi || !sdi->priv || !ops || !ops->recover ||
@@ -2352,8 +2451,16 @@ SR_PRIV int dslogic_acquisition_stop_with_ops(const struct sr_dev_inst *sdi,
 	devc->acquisition_state = DSLOGIC_ACQ_STOP;
 	/* DSView sets abort before FORCE_RDY so its reply cannot become a trigger. */
 	devc->acq_aborted = TRUE;
+	/*
+	 * Drain in-flight bulk transfers before issuing stop/recovery control
+	 * transfers. Sending them while the data pipe is still active makes
+	 * libusb return LIBUSB_ERROR_BUSY and leaves the FPGA running (DSView
+	 * writes FORCE_RDY on a quiet pipe).
+	 */
+	drain_error = ops->cancel_and_drain(ops_data, sdi);
 	ret = ops->recover(ops_data, sdi);
-	ops->cancel_and_drain(ops_data, sdi);
+	if (ret == SR_OK)
+		ret = drain_error;
 	return ret;
 }
 
